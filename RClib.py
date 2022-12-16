@@ -5,6 +5,7 @@ import numpy as np
 import os
 import json
 import itertools
+import matplotlib.pyplot as plt
 import pandas as pd
 import pathconfig
 #from geopandas.tools import sjoin
@@ -18,6 +19,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
+config = loadconfigs('.\config.json')
 
 def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
     imagelist = []
@@ -37,7 +39,7 @@ def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
 
 
 def developwithRawTherapee(series, inputrawimagepathfield, pp3file):
-    subprocess.run(str(RTpath) + '-c ' + str(series[inputrawimagepathfield]) + '-q ' + '-t ' + '-p ' + pp3file + ' -b16 ' + '-Y')
+    subprocess.run(str(config['RTpath']) + '-c ' + str(series[inputrawimagepathfield]) + '-q ' + '-t ' + '-p ' + pp3file + ' -b8 ' + '-Y')
 
 
 
