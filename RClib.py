@@ -5,7 +5,6 @@ import numpy as np
 import os
 import json
 import itertools
-import matplotlib.pyplot as plt
 import pandas as pd
 import pathconfig
 #from geopandas.tools import sjoin
@@ -25,23 +24,31 @@ def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
     imagelist = []
     inputdirpath = Path(inputdirectory)
     for scan_id in os.listdir(inputdirectory):
+        
         scan_dir = os.path.join(inputdirectory, scan_id)
         
         for path, subdirs, files in os.walk(scan_dir):
             for image in files:
+                if image.endswith('.pp3'):
+                    pp3file = image
                 if image.endswith(imageformat) and 'Thumbs' not in image:
                     image_dict = {}
+                    image_dict['pp3_path']= Path(path) / pp3file
                     image_dict['scan_id']=scan_id
-                    image_dict['img_path']= os.path.join(scan_dir, image)
+                    image_dict['img_path']= Path(path) / image
                     imagelist.append(image_dict.copy())
-                if image.endswith('.pp3'):
-                    image_dict['pp3_path']= os.path.join(scan_dir, image)
 
     return pd.DataFrame(imagelist)
 
-
-def developwithRawTherapee(series, inputrawimagepathfield, pp3file):
-    subprocess.run(str(config['RTpath']) + '-c ' + str(series[inputrawimagepathfield]) + '-q ' + '-t ' + '-p ' + pp3file + ' -b8 ' + '-Y')
+def defineRawTherapeeOutput(series, foldername=''):
+    series['outputfolder'] = Path(config['workspace']) / series['scan_id'] / foldername
+    return series
+def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield, outputfolderfield = 'outputfolder'):
+    outfile = series[outputfolderfield] / Path(str(series[inputrawimagepathfield].stem) + '.jpg')
+    print('Expect file: ', outfile)
+    print('"' + str(Path(config['RTpath']).as_posix()) + '"'   + ' -js 3' + ' -q ' +  ' -Y ' + ' -o ' + '"' + str(outfile.as_posix()) + '"'+ ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
+    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
+    
 
 
 
