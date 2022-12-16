@@ -3,10 +3,11 @@ import subprocess
 from pathlib import Path
 import numpy as np
 import os
+import json
 import itertools
 import matplotlib.pyplot as plt
 import pandas as pd
-import paths
+import pathconfig
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
@@ -16,6 +17,12 @@ RCpath= Path('C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.e
 messagepath= Path('D:/3DPhotogrammetry/WES_L18_Boat1/RCmessages')
 rccmdpath= Path('D:/3DPhotogrammetry/WES_L18_Boat1/temp.rccmd')
 
+
+
+def loadconfigs(configpath):
+    with open(configpath) as configfile:
+        config = json.load(configfile)
+    return config
 
 def developwithRawTherapee(series, inputrawimagepathfield, pp3file):
     subprocess.run(str(RTpath) + '-c ' + str(series[inputrawimagepathfield]) + '-q ' + '-t ' + '-p ' + pp3file + ' -b16 ' + '-Y')
