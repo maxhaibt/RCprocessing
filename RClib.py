@@ -5,9 +5,13 @@ import numpy as np
 import os
 import json
 import itertools
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import pandas as pd
 import pathconfig
+#from geopandas.tools import sjoin
+#from shapely.geometry import Polygon
+#import pickle
+
 
 
 
@@ -15,6 +19,23 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
+
+def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
+    imagelist = []
+    inputdirpath = Path(inputdirectory)
+    for scan_id in os.listdir(inputdirectory):
+        scan_dir = os.path.join(inputdirectory, scan_id)
+        
+        for path, subdirs, files in os.walk(scan_dir):
+            for file in files:
+                if image.endswith(imageformat) and 'Thumbs' not in image:
+                    image_dict = {}
+                    image_dict['scan_id']=scan_id
+                    image_dict['img_path']= os.path.join(scan_dir, image)
+                    imagelist.append(image_dict.copy())
+
+    return pd.DataFrame(imagelist)
+
 
 def developwithRawTherapee(series, inputrawimagepathfield, pp3file):
     subprocess.run(str(RTpath) + '-c ' + str(series[inputrawimagepathfield]) + '-q ' + '-t ' + '-p ' + pp3file + ' -b16 ' + '-Y')
@@ -292,20 +313,7 @@ def create_RCtiepoints(groups):
     
     
         
-def provide_imagelist(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
-    imagelist = []
-    for scan_id in os.listdir(inputdirectory):
-        scan_dir = os.path.join(inputdirectory, scan_id)
-        
-        for image in os.listdir(scan_dir):
 
-            if image.endswith(imageformat) and 'Thumbs' not in image and 'mask' not in image:
-                image_dict = {}
-                image_dict['scan_id']=scan_id
-                image_dict['img_path']= os.path.join(scan_dir, image)
-                imagelist.append(image_dict.copy())
-
-    return pd.DataFrame(imagelist)
 
 def createStartCommand(grid_df, RCpath, instanceName, messagepath, RCbaseProject, RCCMD):
     
