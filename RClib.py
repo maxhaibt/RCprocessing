@@ -5,7 +5,6 @@ import numpy as np
 import os
 import json
 import itertools
-import matplotlib.pyplot as plt
 import pandas as pd
 import pathconfig
 #from geopandas.tools import sjoin
@@ -27,7 +26,7 @@ def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
         scan_dir = os.path.join(inputdirectory, scan_id)
         
         for path, subdirs, files in os.walk(scan_dir):
-            for file in files:
+            for image in files:
                 if image.endswith(imageformat) and 'Thumbs' not in image:
                     image_dict = {}
                     image_dict['scan_id']=scan_id
