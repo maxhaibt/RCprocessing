@@ -6,6 +6,7 @@ import os
 import itertools
 import matplotlib.pyplot as plt
 import pandas as pd
+import paths
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
