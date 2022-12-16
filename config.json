@@ -1,8 +1,7 @@
 {
-    "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
+    "RTpath": "C:/Program Files/RawTherapee/5.9/rawtherapee-cli.exe",
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
-"messagepath": "D:/3DPhotogrammetry/WES_L18_Boat1/RCmessages"
-popoArsch
-
-    }
+    "messagepath": "E:/01_Digitization/VAM/99_useful/02_PG/01_RCMessages",
+    "worspace": "E:/01_Digitization/VAM/10_Room"
+}
     
