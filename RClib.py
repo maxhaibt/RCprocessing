@@ -34,6 +34,8 @@ def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
                     image_dict['scan_id']=scan_id
                     image_dict['img_path']= os.path.join(scan_dir, image)
                     imagelist.append(image_dict.copy())
+                if image.endswith('.pp3'):
+                    image_dict['pp3_path']= os.path.join(scan_dir, image)
 
     return pd.DataFrame(imagelist)
 
