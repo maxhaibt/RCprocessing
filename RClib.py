@@ -20,23 +20,21 @@ def loadconfigs(configpath):
     return config
 config = loadconfigs('.\config.json')
 
-def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
+def provide_imagedf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     imagelist = []
     inputdirpath = Path(inputdirectory)
     for scan_id in os.listdir(inputdirectory):
         
         scan_dir = os.path.join(inputdirectory, scan_id)
-        
-        for path, subdirs, files in os.walk(scan_dir):
-            for image in files:
-                if image.endswith('.pp3'):
-                    pp3file = image
-                if image.endswith(imageformat) and 'Thumbs' not in image:
-                    image_dict = {}
-                    image_dict['pp3_path']= Path(path) / pp3file
-                    image_dict['scan_id']=scan_id
-                    image_dict['img_path']= Path(path) / image
-                    imagelist.append(image_dict.copy())
+        for file in Path(scan_dir).rglob("*.pp3"):
+            pp3file=file
+        for file in Path(scan_dir).rglob(imageformat):
+            image_dict = {}
+            image_dict['pp3_path']= pp3file
+            print(image_dict['pp3_path'])
+            image_dict['scan_id']=scan_id
+            image_dict['img_path']= file
+            imagelist.append(image_dict.copy())
 
     return pd.DataFrame(imagelist)
 
@@ -44,15 +42,25 @@ def defineRawTherapeeOutput(series, foldername=''):
     series['outputfolder'] = Path(config['workspace']) / series['scan_id'] / foldername
     return series
 
-def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield, outputfolderfield = 'outputfolder', outputdevimagepathfield='dev-img_path'):
+def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield = 'pp3_path', outputfolderfield = 'outputfolder', outputdevimagepathfield='dev-img_path'):
+    series[outputfolderfield].mkdir(exist_ok=True)
     outfile = series[outputfolderfield] / Path(str(series[inputrawimagepathfield].stem) + '.jpg')
     print('Expect file: ', outfile)
-    print('"' + str(Path(config['RTpath']).as_posix()) + '"'   + ' -js 3' + ' -q ' +  ' -Y ' + ' -o ' + '"' + str(outfile.as_posix()) + '"'+ ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
-    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + '-p ' + str(series[pp3filefield].as_posix()) + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
+    print('"' + str(Path(config['RTpath']).as_posix()) + '"'   + ' -js 3' + ' -q ' +  ' -Y ' + ' -o ' + '"' + str(outfile.as_posix()) + '"'+ ' -c ' +  3 + str(series[inputrawimagepathfield].as_posix()) +  '"')
+    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + '-p ' + '"' + str(series[pp3filefield].as_posix()) + '"' + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
     series[outputdevimagepathfield]= outfile
     return series
-def makeIMagelist
-def rccmdImportImagelist(commandlist)
+def makeImagelist(df, imagelistfield, imagelistname):
+    imagelistname = imagelistname + '.imagelist'
+    imagelistpath = Path(config['workspace']) / 'temporaryfiles' / imagelistname
+    imagelistpath.touch(parents=True, exist_ok=True)
+    with imagelistpath.open('a') as imagelistfile:
+        for item in df[imagelistfield]:
+        # write each item on a new line
+            imagelistfile.write("%s\n" % item)
+    return print('Created imagelist ', imagelistname)
+
+
 
 
 def missingInMaster(all, master):
