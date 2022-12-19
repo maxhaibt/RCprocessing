@@ -43,13 +43,16 @@ def provide_imagedf(inputdirectory: str, imageformat = '.dng') ->pd.DataFrame:
 def defineRawTherapeeOutput(series, foldername=''):
     series['outputfolder'] = Path(config['workspace']) / series['scan_id'] / foldername
     return series
-def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield, outputfolderfield = 'outputfolder'):
+
+def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield, outputfolderfield = 'outputfolder', outputdevimagepathfield='dev-img_path'):
     outfile = series[outputfolderfield] / Path(str(series[inputrawimagepathfield].stem) + '.jpg')
     print('Expect file: ', outfile)
     print('"' + str(Path(config['RTpath']).as_posix()) + '"'   + ' -js 3' + ' -q ' +  ' -Y ' + ' -o ' + '"' + str(outfile.as_posix()) + '"'+ ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
-    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
-    
-
+    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + '-p ' + str(series[pp3filefield].as_posix()) + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
+    series[outputdevimagepathfield]= outfile
+    return series
+def makeIMagelist
+def rccmdImportImagelist(commandlist)
 
 
 def missingInMaster(all, master):
@@ -60,7 +63,7 @@ def missingInMaster(all, master):
 def executeRCCMDuseRCproject(projectpath, commandlist, instanceName = 'default'):
     with open(str(rccmdpath), "w") as outfile:
         outfile.write("\n".join(commandlist))
-    subprocess.run('"'+ str(RCpath) + '"' + ' -setInstanceName ' + instanceName + ' -silent ' + str(messagepath) + ' -set "appQuitOnError=true" -load ' + projectpath + ' -execRCCMD ' + '"' + str(rccmdpath) + '"' +' -quit')
+    subprocess.check_output('"'+ str(RCpath) + '"' + ' -setInstanceName ' + instanceName + ' -silent ' + str(messagepath) + ' -set "appQuitOnError=true" -load ' + projectpath + ' -execRCCMD ' + '"' + str(rccmdpath) + '"' +' -quit')
 
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
