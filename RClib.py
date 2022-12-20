@@ -20,47 +20,74 @@ def loadconfigs(configpath):
     return config
 config = loadconfigs('.\config.json')
 
-def provide_imagedf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
-    imagelist = []
-    inputdirpath = Path(inputdirectory)
+def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
+    scandf = []
     for scan_id in os.listdir(inputdirectory):
-        
-        scan_dir = os.path.join(inputdirectory, scan_id)
-        for file in Path(scan_dir).rglob("*.pp3"):
-            pp3file=file
-        for file in Path(scan_dir).rglob(imageformat):
+        scan = {}
+        scan['id']= scan_id
+        scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
+        scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
+        imagelist = []
+        for file in scan['scan_dir'].rglob(imageformat):
             image_dict = {}
-            image_dict['pp3_path']= pp3file
-            print(image_dict['pp3_path'])
-            image_dict['scan_id']=scan_id
-            image_dict['img_path']= file
+            image_dict['rawimg_path']= Path(file)
             imagelist.append(image_dict.copy())
-
-    return pd.DataFrame(imagelist)
+        scan['imagedf'] = pd.DataFrame(imagelist)
+        scandf.append(scan.copy())
+    return pd.DataFrame(scandf)
 
 def defineRawTherapeeOutput(series, foldername=''):
-    series['outputfolder'] = Path(config['workspace']) / series['scan_id'] / foldername
+    series['RToutputfolder'] = Path(config['workspace']) / series['id'] / foldername
+    series['RToutputfolder'].mkdir(exist_ok=True)
     return series
 
-def developwithRawTherapee(series, inputrawimagepathfield, pp3filefield = 'pp3_path', outputfolderfield = 'outputfolder', outputdevimagepathfield='dev-img_path'):
-    series[outputfolderfield].mkdir(exist_ok=True)
-    outfile = series[outputfolderfield] / Path(str(series[inputrawimagepathfield].stem) + '.jpg')
-    print('Expect file: ', outfile)
-    print('"' + str(Path(config['RTpath']).as_posix()) + '"'   + ' -js 3' + ' -q ' +  ' -Y ' + ' -o ' + '"' + str(outfile.as_posix()) + '"'+ ' -c ' +  3 + str(series[inputrawimagepathfield].as_posix()) +  '"')
-    subprocess.check_output( '"' + str(Path(config['RTpath']).as_posix()) + '"'  + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' + '-p ' + '"' + str(series[pp3filefield].as_posix()) + '"' + ' -c ' +  '"' + str(series[inputrawimagepathfield].as_posix()) +  '"')
-    series[outputdevimagepathfield]= outfile
+def defineRealityCaptureOutput(series, foldername=''):
+    series['RCoutputfolder'] = Path(config['workspace']) / series['id'] / foldername
+    series['RCoutputfolder'].mkdir(exist_ok=True)
     return series
-def makeImagelist(df, imagelistfield, imagelistname):
+
+def developwithRawTherapee(imageseries, pp3filepath , outputfolderpath, inputrawimagepathfield = 'rawimg_path', outputdevimagepathfield='dev-img_path'):
+    outfile = outputfolderpath / Path(str(imageseries[inputrawimagepathfield].stem + '.png') )
+    if not outfile.is_file() or outfile.is_file() and config['overwrite_dev-img'] :
+        if imageseries['rawimg_path'].is_file():
+            print('Inputfile: ', imageseries['rawimg_path'])
+            print('Expect file: ', outfile)
+        subprocess.check_output( '"' + str(config['RTpath']) + '"' \
+             + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' \
+            + '-p ' + '"' + str(Path(pp3filepath).as_posix()) + '"' + \
+             ' -c '  +  '"' + str(imageseries['rawimg_path']) +  '"' \
+             ) 
+    if outfile.is_file():
+        imageseries[outputdevimagepathfield]= outfile
+        #print(imageseries[outputdevimagepathfield])
+    else: print(outfile, ' was not developed.')
+    return imageseries
+def makeImagelist(scan, imagelistname, imagefield='dev-img_path'):
+    #takes a dataframe as input and expects imagepaths in the specified field
+    # The name of the resulting imagelist-file must be specified and will be stored in the df 
     imagelistname = imagelistname + '.imagelist'
-    imagelistpath = Path(config['workspace']) / 'temporaryfiles' / imagelistname
-    imagelistpath.touch(parents=True, exist_ok=True)
+    imagelistpath = scan['RCoutputfolder']/ imagelistname
+    #print(scan[imagefield])
+    #imagelistpath.parent.mkdir(parents=True, exist_ok=True)
+    #imagelistpath.unlink()
+    imagelistpath.touch(exist_ok=True)
     with imagelistpath.open('a') as imagelistfile:
-        for item in df[imagelistfield]:
+        for index, image in scan['imagedf'].iterrows():
         # write each item on a new line
-            imagelistfile.write("%s\n" % item)
-    return print('Created imagelist ', imagelistname)
+            imagelistfile.write("%s\n" % image[imagefield])
+    scan['list_' + imagefield]= imagelistpath
+    return scan
 
-
+def createRCproject(scan):
+    rcproj = scan['id']+'_project.rcproj'
+    rcproj_path = scan['RCoutputfolder'] / rcproj
+    subprocess.check_output( '"' + str(Path(config['RCpath']).as_posix()) + '"' \
+    + ' -headless' + ' -newScene'\
+    + ' -save ' '"' + str(rcproj_path.as_posix()) + '"' \
+    + ' -quit')
+    if rcproj_path.is_file():
+        scan['rcproj_path']=rcproj_path
+    return scan
 
 
 def missingInMaster(all, master):
@@ -68,15 +95,23 @@ def missingInMaster(all, master):
     merged['exists'] = np.where(merged.exists == 'both', True, False)
     return merged
 
-def executeRCCMDuseRCproject(projectpath, commandlist, instanceName = 'default'):
-    with open(str(rccmdpath), "w") as outfile:
-        outfile.write("\n".join(commandlist))
-    subprocess.check_output('"'+ str(RCpath) + '"' + ' -setInstanceName ' + instanceName + ' -silent ' + str(messagepath) + ' -set "appQuitOnError=true" -load ' + projectpath + ' -execRCCMD ' + '"' + str(rccmdpath) + '"' +' -quit')
+def executeRCCMDuseRCproject(scan, commandlistfield, instanceName = 'default'):
+    rccmdname = commandlistfield + '.rccmd'
+    rccmdpath = scan['RCoutputfolder'] / rccmdname
+    rccmdpath.touch(exist_ok=True)
+    with rccmdpath.open('a') as rccmds:
+        for rccmd in scan[commandlistfield]:
+        # write each item on a new line
+            rccmds.write("%s\n" % rccmd)
+    subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
+         + ' -setInstanceName ' + instanceName +  \
+         ' -set "appQuitOnError=true" -load ' + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(rccmdpath) + '"' +' -quit')
 
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
     commandlist.append(command)
     return commandlist
+
 
 def writeImagelist(series, sourceimagefolder, outputfolder):
     with open(str(rccmdpath), "w") as outfile:
