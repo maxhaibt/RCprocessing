@@ -1,0 +1,193 @@
+Name;Key;Value;Default value;Type
+"Include subdirectories
+*relevant for: addFolder command";appIncSubdirs;bool;FALSE;General
+Automatic updates;appAutoUpdate;bool;TRUE;General
+Log file;appLog;bool;TRUE;General
+Operation log data;operationLog;bool;TRUE;General
+Auto save mode;appAutoSaveMode;bool;FALSE;General
+"Handling of autosaved projects*
+*defines how to load autosaved projects (if present) when using load command. 
+More information about Autosave feature here.";appAutoSaveCliHandling;delete, recover, abort ask;delete;General
+;;;;General
+;;;;General
+;;;;General
+Max points to display;appMaxPointsToDisplay;integer;10000000;General
+Cache location;appCacheLocation;SystemTemp;SystemTemp;General
+;;ProjectFolder;;General
+;;Custom;;General
+"Cache custom location*
+*relevant for: ""appCacheLocation=Custom""";appCacheCustomLocation;path; ;General
+Clear cache on exit;appAutoClearCache;999999 – Do not clear cache, 0 – Clear all cache items, 3 – Items older than 3 days, 7 – Items older than 1 week, 14 – Items older than 2 weeks, 30 – Items older than 1 month, 90 – Items older than 3 months;7 – Items older than 1 week;General
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+Cache image metadata;appCacheImageMetadata;bool;TRUE;General
+Zoom;appThemeZoom;0 - Use Windows Settings, 1 – 100%, 1.25 – 125%, 1.5 – 150%, 2 - 4K (200%), 3 - 300%;0 - Use Windows Settings;Visual and language settings
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+Animated UI;appUIAnim;bool;TRUE;Visual and language settings
+UI Language;UserInterfaceLanguageId;2052 - Chinese (simplified), 1028 - Chinese (traditional), 1029 – Czech, 1033 – English, 1036 – French, 1031 – German, 1040 – Italian, 1041 – Japanese, 1042 – Korean, 3082 - Spanish; ;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+Group calibration by exif;appGroupCalibrationByExif;bool;FALSE;Import settings
+Copy imported components to cache;appCopyImportedComponentsToCache;bool;FALSE;Import settings
+Ignore exif GPS;appIgnoreExifGPS;bool;FALSE;Import settings
+Minimal process duration;appProcessActionTime;int;15;Progress and notification
+Action;appProcessAction;None, PlaySound, ExecuteProgram;None;Progress and notification
+;;;;
+;;;;
+"Command-line process*
+*relevant for: ""appProcessAction=ExecuteProgram""";appProcessExecCmd;string; ;Progress and notification
+Enable automatic renewal of license activation;appLicenseAutoRenew;bool;true (when activating the license via the activate command);Licenses
+Max features per mpx;sfmMaxFeaturesPerMpx;int;10000;Alignment Settings
+Max features per image;sfmMaxFeaturesPerImage;int;40000;Alignment Settings
+Images' overlap;sfmImagesOverlap;Low Medium High;Medium;Alignment Settings
+;;;;
+;;;;
+Image downscale factor;sfmImageDownscaleFactor;int;1;Alignment Settings
+Max feature reprojection error;sfmMaxFeatureReprojectionError;float;2;Alignment Settings
+Use camera priors for georeferencing;sfmEnableCameraPrior;bool;TRUE;Camera priors settings
+Position X accuracy;sfmCameraPriorAccuracyX;float;10;Camera priors settings
+Position Y accuracy;sfmCameraPriorAccuracyY;float;10;Camera priors settings
+Position Z accuracy;sfmCameraPriorAccuracyZ;float;20;Camera priors settings
+Position prior hardness;sfmCameraPriorWeight;float;1;Camera priors settings
+Yaw accuracy;sfmCameraPriorAccuracyYaw;float;10;Camera priors settings
+Pitch accuracy;sfmCameraPriorAccuracyPitch;float;10;Camera priors settings
+Roll accuracy;sfmCameraPriorAccuracyRoll;float;10;Camera priors settings
+Orientation prior hardness;sfmCameraPriorWeightOrientation;float;1;Camera priors settings
+Image measurement accuracy [px];sfmControPointImageMeasAccuracy;float;2;Control point prior settings
+Position X accuracy;sfmControlPointXAccuracy;float;0.05;Control point prior settings
+Position Y accuracy;sfmControlPointYAccuracy;float;0.05;Control point prior settings
+Position Z accuracy;sfmControlPointZAccuracy;float;0.1;Control point prior settings
+Defined distance accuracy;sfmDefinedDistanceAccuracy;float;0.1;Control point prior settings
+Overlap of images;sfmImagesOverlapDraftMode;Low, Medium, High;Medium;Draft mode
+;;;;
+;;;;
+Image downscale factor;sfmImageDownscaleFactorDraftMode;integer;2;Draft mode
+Final model optimization;sfmFinalModelOptimizationDraftMode;bool;FALSE;Draft mode
+Add a reconstruction region after alignment;sfmAutoReconRegionAfterAlignment;bool;TRUE;Alignment-Advanced
+Force component rematch;sfmForceComponentRematch;bool;FALSE;Alignment-Advanced
+Preselector features;sfmPreselectorFeatures;int;10000;Alignment-Advanced
+Detector sensitivity;sfmDetectorSensitivity;Low Medium High Ultra;Medium;Alignment-Advanced
+;;;;
+;;;;
+;;;;
+Merge georeferenced components;sfmMergeGeoreferencedComponents;bool;FALSE;Alignment-Advanced
+Distortion model;sfmDistortionModel;Division Brown3 Brown4 Brown3WithTangential2 Brown4WithTangential2 KplusBrown3WithTangential2 KplusBrown4WithTangential2;Brown3;Alignment-Advanced
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+Prefer images as feature source during import of Z+F laser scans;lisPreferImagesAsFeatureSource;bool;TRUE;Alignment-Advanced
+Image downscale;mvsPreviewDownscaleFactor;int;4;Image depth map calculation - Preview model
+Image downscale;mvsNormalDownscaleFactor;int;2;Image depth map calculation - Normal model
+Minimal distance between two points;mvsMinSampleDistanceLaserScan;float;0.002;Laser scans
+Point-cloud cropping radius;mvsMaxSampleDistanceLaserScan;float;150;Laser scans
+Minimal intensity;mvsMinIntensityLaserScan;float;0.03;Laser scans
+Minimal distance between two vertices;mvsMinSampleDistance;float;0;Mesh calculation
+Mesh calculaton strategy;mvsPreviewMeshStrategy;sfm – Use sparse point cloud, vertexCount - Max vertex count;sfm;Mesh calculation - Preview model
+;;;;
+"Max vertex count*
+*relevant for: ""mvsPreviewMeshStrategy=vertexCount""";mvsPreviewMaxVetrexCountInModel;int;10000000;Mesh calculation - Preview model
+Maximal vertex count per part;mvsMaxVertexCountInPart;int;5000000;Reconstruction-Advanced
+Detail decimation factor;mvsDecimationFactor;float;1;Reconstruction-Advanced
+Adaptive blending start;mvsAdaptiveBlendingStart;float;0.45;Reconstruction-Advanced
+Smoothing;mvsSmoothingWeight;float;1.5;Reconstruction-Advanced
+Default grouping factor;mvsDefaultGroupingFactor;float;1;Advanced - Photogrammetry
+Low texture grouping factor;mvsLowTextureGroupingFactor;float;0.25;Advanced - Photogrammetry
+Default noise factor;mvsDefaultNoiseFactor;float;1;Advanced - Photogrammetry
+Low texture noise factor;mvsLowTextureNoiseFactor;float;2;Advanced - Photogrammetry
+Filter radius;mvsFilteringRadius;float;3;Advanced - Mesh filtration
+Filter strength;mvsFilteringStrength;int;2;Advanced - Mesh filtration
+Maximal vertices' count per part;mvsImportMaxTrianglesPerPart;int;100000000;Advanced - Model import
+Gutter;unwrapGutter;int;2;Default unwrap parameters
+Maximal texture resolution;unwrapMaxTexResolution;512;8192;Default unwrap parameters
+;;1024;;
+;;2048;;
+;;4096;;
+;;8192;;
+;;16384;;
+Large triangle removal threshold;unwrapLargeTriangleRemovalThr;int;10;Default unwrap parameters
+Style;unwrapStyle;MaxTexturesCount;MaxTexturesCount;Default unwrap parameters
+;;FixedTexelSize;;
+;;AdaptiveTexelSize;;
+"Maximal textures' count*
+*relevant for: ""unwrapStyle=MaxTexturesCount""";unwrapMaximalTexCount;int;1;Default unwrap parameters
+"Texel size*
+*relevant for: ""unwrapStyle=FixedTexelSize""";unwrapFixedTexelSizeType;0 – Optimal, 1 - 2x optimal (50% texture quality), 2 - 4x optimal (25% texture quality), 3 - 10x optimal (10% texture quality), 4 - 100x optimal (1% texture quality), 5 - Custom;0;Default unwrap parameters
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+"Custom texel size*
+*relevant for: ""unwrapStyle=FixedTexelSize""
+""unwrapFixedTexelSizeType =5""";unwrapFixedTexelSize;float;0.01;Default unwrap parameters
+"Minimal required texel size*
+*relevant for: ""unwrapStyle=AdaptiveTexelSize""";unwrapMinTexelSize;0 - Optimal;0;Default unwrap parameters
+;;1 – 2x optimal (50% texture quality), 2 – 4x optimal (25% texture quality), 3 – 10x optimal (10% texture quality), 4 – 100x optimal (1% texture quality), 5 - Custom;;
+;;;;
+;;;;
+;;;;
+;;;;
+"Custom minimal required texel size*
+*relevant for: ""unwrapStyle=FixedTexelSize""
+""unwrapFixedTexelSizeType =5""";unwrapMinTexelSize;float;0.01;Default unwrap parameters
+"Maximal required texel size*
+*relevant for: ""unwrapStyle=AdaptiveTexelSize""";unwrapMaxTexelSize;0 – Optimal, 1 – 2x optimal (50% texture quality), 2 – 4x optimal (25% texture quality), 3 – 10x optimal (10% texture quality), 4 – 100x optimal (1% texture quality), 5 - Custom;4;Default unwrap parameters
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+"Custom maximal required texel size*
+*relevant for: ""unwrapStyle=FixedTexelSize""
+""unwrapFixedTexelSizeType =5""";unwrapMaxTexelSize;float;10;Default unwrap parameters
+Imported model default texture resolution;txtImportDefaultTexResolution;512, 1024, 2048, 4096, 8192, 16384;8192;Coloring/Texturing
+;;;;
+;;;;
+;;;;
+;;;;
+;;;;
+Coloring method;txtMethod;Linear, MultiBand;MultiBand;Coloring/Texturing
+;;;;
+Coloring style;colStyle;PhotoConsistencyBased, VisibilityBased;VisibilityBased;Coloring/Texturing
+;;;;
+Coloring image layer;ImageLayerForColoring;geometry/name_of_geometry_layer, texture01/name_of_texture_layer, texture2/name_of_texture_layer2;"geometry (if no texturing layer is present)
+texture01 (if any texturing layer is present)";Coloring/Texturing
+;;;;
+;;;;
+Texturing style;txtStyle;PhotoConsistencyBased , VisibilityBased, MaximalIntensity, MinimalIntensity, AverageIntensity;VisibilityBased;Coloring/Texturing
+;;;;
+;;;;
+;;;;
+;;;;
+Texturing image layer;ImageLayerForTexturing;geometry/name_of_geometry_layer, texture01/name_of_texture_layer, texture2/name_of_texture_layer2, all;all (All texturing layers);Coloring/Texturing
+;;;;
+;;;;
+;;;;
+Downscale images before coloring;txtImageDownscaleColor;int;1;Coloring/Texturing
+Downscale images before texturing;txtImageDownscaleTexture;int;2;Coloring/Texturing
+Fill in uncolored parts;txtFillInUncoloredParts;bool;TRUE;Coloring/Texturing
+Fill in untextured parts;txtFillInUntextoredParts;bool;TRUE;Coloring/Texturing
+Recolor model after texturing;txtRecolorAfterTexturing;bool;TRUE;Coloring/Texturing
+Correct colors;MvsDoCorrectColors;bool;FALSE;Coloring/Texturing
+Ignore color correction;MvsIgnoreCorrectColors;bool;FALSE;Coloring/Texturing
+Prefer 16-bit/HDR texture generation;MvsGeometryTexturingDoHdr;bool;TRUE;Coloring/Texturing
+Quit on error;appQuitOnError;bool;FALSE;Error-handling Settings
+Quit on required restart;appQuitOnReset;bool;FALSE;Error-handling Settings
