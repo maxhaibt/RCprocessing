@@ -89,6 +89,11 @@ def createRCproject(scan):
         scan['rcproj_path']=rcproj_path
     return scan
 
+def covertRCsettingsDFToRCCMD(series, outputfile):
+    with outputfile.open('a') as rccmdsettings:
+        rccmdsettings.write('-set "' + str(series['Key']) + '=' + str(series['Default value']) + '"' + "\n")
+    return series
+
 
 def missingInMaster(all, master):
     merged = pd.merge(all, master, on=['imgpath', 'x', 'y'], how='left', indicator='exists')
