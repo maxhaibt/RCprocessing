@@ -100,17 +100,24 @@ def missingInMaster(all, master):
     merged['exists'] = np.where(merged.exists == 'both', True, False)
     return merged
 
-def executeRCCMDuseRCproject(scan, commandlistfield, instanceName = 'default'):
+
+def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
     rccmdname = commandlistfield + '.rccmd'
     rccmdpath = scan['RCoutputfolder'] / rccmdname
+    rccmdpath.unlink()
     rccmdpath.touch(exist_ok=True)
     with rccmdpath.open('a') as rccmds:
         for rccmd in scan[commandlistfield]:
         # write each item on a new line
             rccmds.write("%s\n" % rccmd)
+    if rccmdpath.is_file():
+        print(rccmdpath)
+        scan[rccmdpathfield]=rccmdpath
+    return scan
+def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'default'):
     subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
-         + ' -setInstanceName ' + instanceName +  \
-         ' -set "appQuitOnError=true" -load ' + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(rccmdpath) + '"' +' -quit')
+         + ' -setInstanceName ' + instanceName + ' -load ' \
+        + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
 
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
