@@ -22,18 +22,19 @@ config = loadconfigs('.\config.json')
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
-    for scan_id in os.listdir(inputdirectory):
-        scan = {}
-        scan['id']= scan_id
-        scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
-        scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
-        imagelist = []
-        for file in scan['scan_dir'].rglob(imageformat):
-            image_dict = {}
-            image_dict['rawimg_path']= Path(file)
-            imagelist.append(image_dict.copy())
-        scan['imagedf'] = pd.DataFrame(imagelist)
-        scandf.append(scan.copy())
+    for scan_id in Path(inputdirectory).iterdir():
+        if scan_id.is_dir():
+            scan = {}
+            scan['id']= scan_id.stem
+            scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
+            scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
+            imagelist = []
+            for file in scan['scan_dir'].rglob(imageformat):
+                image_dict = {}
+                image_dict['rawimg_path']= Path(file)
+                imagelist.append(image_dict.copy())
+            scan['imagedf'] = pd.DataFrame(imagelist)
+            scandf.append(scan.copy())
     return pd.DataFrame(scandf)
 
 def defineRawTherapeeOutput(series, foldername=''):
@@ -69,22 +70,24 @@ def makeImagelist(scan, imagelistname, imagefield='dev-img_path'):
     imagelistpath = scan['RCoutputfolder']/ imagelistname
     #print(scan[imagefield])
     #imagelistpath.parent.mkdir(parents=True, exist_ok=True)
-    #imagelistpath.unlink()
-    imagelistpath.touch(exist_ok=True)
-    with imagelistpath.open('a') as imagelistfile:
-        for index, image in scan['imagedf'].iterrows():
-        # write each item on a new line
-            imagelistfile.write("%s\n" % image[imagefield])
+    if not imagelistpath.is_file() or imagelistpath.is_file() and config['overwrite_imagelist'] :
+        imagelistpath.unlink()
+        imagelistpath.touch(exist_ok=True)
+        with imagelistpath.open('a') as imagelistfile:
+            for index, image in scan['imagedf'].iterrows():
+            # write each item on a new line
+                imagelistfile.write("%s\n" % image[imagefield])
     scan['list_' + imagefield]= imagelistpath
     return scan
 
 def createRCproject(scan):
     rcproj = scan['id']+'_project.rcproj'
     rcproj_path = scan['RCoutputfolder'] / rcproj
-    subprocess.check_output( '"' + str(Path(config['RCpath']).as_posix()) + '"' \
-    + ' -headless' + ' -newScene'\
-    + ' -save ' '"' + str(rcproj_path.as_posix()) + '"' \
-    + ' -quit')
+    if not rcproj_path.is_file() or rcproj_path.is_file() and config['overwrite_all_rcproj'] :
+        subprocess.check_output( '"' + str(Path(config['RCpath']).as_posix()) + '"' \
+        + ' -headless' + ' -newScene' \
+        + ' -save ' + '"' + str(rcproj_path.as_posix()) + '"' \
+        + ' -quit')
     if rcproj_path.is_file():
         scan['rcproj_path']=rcproj_path
     return scan
@@ -116,7 +119,7 @@ def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
     return scan
 def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'default'):
     subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
-         + ' -setInstanceName ' + instanceName + ' -load ' \
+         + ' -headless' + ' -setInstanceName ' + instanceName + ' -load ' \
         + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
 
 def rccmdExportControlPoints(commandlist, cpmFileName):

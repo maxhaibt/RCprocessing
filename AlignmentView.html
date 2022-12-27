@@ -1,0 +1,257 @@
+﻿$Using( "CapturingReality.Report.ProjectInformationExportFunctionSet" )
+$Using( "CapturingReality.Report.LocalizationExportFunctionSet" )
+$Using( "CapturingReality.Report.IteratorsFunctionSet" )
+$Using( "CapturingReality.Report.SfmExportFunctionSet" )
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="GENERATOR" content="Epic Games Slovakia s.r.o." />
+    <meta charset="UTF-8">
+    <title>RealityCapture Alignment</title>
+    <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=10"/><![endif]-->
+    <style>
+        $Include("Reports\styles\style.css")
+        $Include("Reports\styles\colors.css")
+        canvas {
+            width: 100%;
+            height: 600px;
+            display: block;
+        }
+    </style>
+    <script type="text/javascript" src="$(attachmentPath)CapturingReality-v1.js"></script>
+    <script type="text/javascript" src="$(attachmentPath)CapturingReality.Vis-v1.js"></script>
+    <script type="text/javascript" src="$(attachmentPath)CapturingReality.Node-v1.js"></script>
+</head>
+
+<body>
+    $ExportProjectInfo(
+
+    $IfFileExists("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_overview.xml", $SetLocalization("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_overview.xml"))
+    $IfFileNotExists("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_overview.xml", $SetLocalization("Reports\\$(appLanguage)\\loc_overview.xml"))
+
+    <header>
+        <h1>RealityCapture Web View</h1>
+        <p class="projectName">$Localize("PROJECT", "Project"): <em>$(projectName)</em></p>
+        <h2>$(dateTime)</h2>
+        <h2>RealityCapture <b>$(appVersion)</b></h2>
+    </header>
+
+    <div>
+        <table class="propertiesTable">
+            <tr>
+                <th>$Localize("PROJECT_LOCATION", "Project location")</th>
+                <td>$(projectPath)</td>
+            </tr>
+            <tr>
+                <th>$Localize("NUMBER_OF_INPUTS", "Number of inputs")</th>
+                <td>$(imageCount)</td>
+            </tr>
+            <tr>
+                <th>$Localize("NUMBER_OF_COMPONENTS", "Number of components")</th>
+                <td>$(componentCount)</td>
+            </tr>
+            $Declare( "modelsCount", 0 )
+            $IterateComponents(
+            $IterateModels( "$(componentGUID)",
+            $Set( "modelsCount", modelsCount + 1 )
+            )
+            )
+            <tr>
+                <th>$Localize("NUMBER_OF_MODELS", "Number of models")</th>
+                <td>$(modelsCount)</td>
+            </tr>
+        </table>
+    </div>
+
+    )<!-- end of ExportProjectInfo -->
+
+    <canvas id="glCanvas" oncontextmenu="return false;"></canvas>
+    <div id="idDataBox"></div>
+
+    <script>
+        var vis = null;
+        var state = null;
+
+        function InitializeStates() {
+            state = new Object();
+            state.stage = 0;
+            state.fetching = false;
+            state.cameraCount = 0;
+            state.pointCount = 0;
+            state.sceneUnit = 1;
+            state.activeCameraSet = new Set();
+            return CapturingReality.ResultCode.Ok;
+        }
+
+        function InitializeRenderer() {
+            var canvas = document.querySelector('#glCanvas');
+
+            vis = new CapturingReality.Vis.WebEngine(canvas);
+            var res = vis.Initialize(canvas);
+            if (res == CapturingReality.ResultCode.Ok) {
+                res = vis.CreateDefaultScene([0.1, 0.1, 0.1], [1, 1, 1], /*{ lineCount: 10, step: 1, color: [0.3, 0.3, 0.3], zeroColor: [0, 0, 0]}*/ null);
+            }
+            if (res == CapturingReality.ResultCode.Ok) {
+
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.RollViewCameraTool([0.2, 0.1], [50, 30]));
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.PanViewCameraTool());
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.DollyViewCameraTool());
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.GotoCameraTool());
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.PivotRotateViewCameraTool());
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.PlacePivotTool());
+                vis.toolManager.AddTool(new CapturingReality.Vis.Tools.TouchViewCameraTool());
+
+                // add invisible pivot
+                var pivot = new CapturingReality.Vis.SceneGraph.MetadataSceneNode("pivot");
+                pivot.position = [0, 0, 0];
+                vis.scene.Add(pivot);
+            }
+
+            return res;
+        }
+
+        function Initialize() {
+            var res = InitializeStates();
+            if (res == CapturingReality.ResultCode.Ok) {
+                res = InitializeRenderer();
+            }
+            return res;
+        }
+
+        function Render(now) {
+
+            vis.Redraw(now);
+            requestAnimationFrame(Render);
+        }
+
+        function StartLookAtAnimation(viewInfo) {
+
+            var duration = 0.5;
+            var animStart = vis.renderContext.now;
+
+            var cameraAnim = new CapturingReality.Vis.Animation.GroupAnimation("cameraAnimation");
+
+            var zoomAnim = new CapturingReality.Vis.Animation.SetCameraZoomAnimation(
+                new CapturingReality.Vis.Animation.EaseChangeValueAnimation("out", viewInfo.refCamera.focal / viewInfo.refCamera.yAspect, viewInfo.viewSpot.focal / viewInfo.refCamera.yAspect, animStart, animStart + duration), vis.renderContext.cameraNode);
+            cameraAnim.Add(zoomAnim);
+
+            var poseAnim = new CapturingReality.Vis.Animation.SetCameraLookAtAnimation(
+                new CapturingReality.Vis.Animation.EaseMovePointAnimation("inout", viewInfo.refCamera.C, viewInfo.viewSpot.C, animStart, animStart + duration * 0.7),
+                new CapturingReality.Vis.Animation.EaseMovePointAnimation("inout", LA.Add(viewInfo.refCamera.C, viewInfo.refCamera.r3), viewInfo.viewSpot.D, animStart, animStart + duration * 0.7),
+                LA.VectorMulScalar(-1, viewInfo.viewSpot.r2), vis.renderContext.cameraNode);
+            cameraAnim.Add(poseAnim);
+
+            // remove previous and add new
+            vis.animation.RemoveByName("cameraAnimation");
+            vis.animation.Add(cameraAnim);
+        }
+
+        function OnDataReady() {
+
+            var newPcd = null;
+            var newCamsO = null;
+            var newCamsN = null;
+
+            if (typeof cameraCloud !== "undefined" && (cameraCloud != null)) {
+
+                var cameras = CapturingReality.RCNodeHelpers.DecodeAndSplitCameras(state.activeCameraSet);
+                var viewInfo = CapturingReality.Vis.SceneGraphHelpers.SelectViewSpotAndScale(cameras.cameras, cameras.newOfs, cameras.cameras.length);
+
+                var cameraScale = viewInfo.scale;
+                StartLookAtAnimation(viewInfo);
+
+                // previous cameras
+                if (cameras.newOfs > 0) {
+                    newCamsO = new CapturingReality.Vis.SceneGraph.LineCloudSceneNode();
+                    newCamsO.name = "SceneMotion";
+                    var cameraFrustums = CapturingReality.Vis.SceneGraphHelpers.CreateCameraFrustumLineCloud(0.3 * cameraScale, cameras.cameras.slice(0, cameras.newOfs));
+                    res = newCamsO.Initialize(vis.renderContext.gl, [1, 1, 1], cameraFrustums);
+                    if (res != CapturingReality.ResultCode.Ok) {
+                        return res;
+                    }
+                }
+
+                // new cameras
+                newCamsN = new CapturingReality.Vis.SceneGraph.LineCloudSceneNode();
+                newCamsN.name = "SceneMotionNew";
+                var cameraFrustums = CapturingReality.Vis.SceneGraphHelpers.CreateCameraFrustumLineCloud(1 * cameraScale, cameras.cameras.slice(cameras.newOfs));
+                res = newCamsN.Initialize(vis.renderContext.gl, [0.63, 1, 0.35], cameraFrustums);
+                if (res != CapturingReality.ResultCode.Ok) {
+                    return res;
+                }
+
+                state.sceneUnit = viewInfo.scale;
+                state.cameraCount = cameraCloud.length / CapturingReality.RCNodeHelpers.EncodedCameraSize();
+
+                vis.scene.RemoveByName("CameraDataNode");
+                var intersectable = new CapturingReality.Vis.SceneGraph.InvisibleIntersectableCameraCloudSceneNode("CameraDataNode", 1, cameras.cameras);
+                vis.scene.Add(intersectable);
+
+                cameraCloud = null;
+            }
+
+            if (typeof pointCloud !== "undefined" && (pointCloud != null)) {
+
+                newPcd = new CapturingReality.Vis.SceneGraph.ColoredPointCloudSceneNode();
+                res = newPcd.Initialize(vis.renderContext.gl, pointCloud, state.sceneUnit * 50);
+                if (res != CapturingReality.ResultCode.Ok) {
+                    return res;
+                }
+                newPcd.name = "SceneStructure";
+                state.pointCount = pointCloud.length / 3;
+
+                vis.scene.RemoveByName("PointDataNode");
+                var intersectable = new CapturingReality.Vis.SceneGraph.InvisibleIntersectablePointCloudSceneNode("PointDataNode", 2, pointCloud, 6);
+                vis.scene.Add(intersectable);
+
+                pointCloud = null;
+            }
+
+            // add objects
+            if (newPcd != null) {
+                vis.scene.RemoveByName("SceneStructure");
+                vis.scene.Add(newPcd);
+            }
+            if (newCamsO != null) {
+                vis.scene.RemoveByName("SceneMotion");
+                vis.scene.Add(newCamsO);
+            }
+            if (newCamsN != null) {
+                vis.scene.RemoveByName("SceneMotionNew");
+                vis.scene.Add(newCamsN);
+            }
+
+            state.fetching = false;
+        }
+
+        async function FetchData() {
+
+            state.fetching = true;
+            var scriptNode = document.createElement('script');
+            scriptNode.src = $EscapeBackslashes('$(attachmentPath)scenedata.js');
+            scriptNode.onload = OnDataReady;
+            idDataBox.innerHTML = "";
+            idDataBox.appendChild(scriptNode);
+        }
+
+        function CheckForData() {
+            FetchData().then(OnDataReady);
+        }
+
+        var res = Initialize();
+        if (res == CapturingReality.ResultCode.Ok) {
+            setTimeout(CheckForData, 10);
+            requestAnimationFrame(Render);
+        }
+
+    </script>
+</body>
+
+</html>
+$EchoOff(
+$ImportFile("Reports\\scripts\\CapturingReality-v1.js", "CapturingReality-v1.js")
+$ImportFile("Reports\\scripts\\CapturingReality.Vis-v1.js", "CapturingReality.Vis-v1.js")
+$ImportFile("Reports\\scripts\\CapturingReality.Node-v1.js", "CapturingReality.Node-v1.js")
+$WriteFile("scenedata.js",var pointCloud=[ $ExportPointsEx("weak|ill|outlier",0,999999,$(aX:.4),$(aY:.4),$(aZ:.4),$(r),$(g),$(b),)$Strip(1)];var cameraCloud = [ $ExportCameras($(originalImageIndex),$(aYaw:.4),$(aPitch:.4),$(aRoll:.4),$(aX:.4),$(aY:.4),$(aZ:.4),$(f:.3),$(height/width:.3),)$Strip(1)];)
+)
