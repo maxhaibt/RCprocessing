@@ -102,3 +102,5 @@
 -set "MvsGeometryTexturingDoHdr=TRUE"
 -set "appQuitOnError=FALSE"
 -set "appQuitOnReset=FALSE"
+-set "CoordinateSystemWorkType=local:1 - Euclidean"
+-set "CoordinateSystemOutputType=local:1 - Euclidean"

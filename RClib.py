@@ -26,8 +26,10 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
         if scan_id.is_dir():
             scan = {}
             scan['id']= scan_id.stem
+            scan['processingstate'] = []
             scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
             scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
+            scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
                 image_dict = {}
@@ -118,10 +120,16 @@ def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
         scan[rccmdpathfield]=rccmdpath
     return scan
 def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'default'):
-    subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
+    try:
+        subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
          + ' -headless' + ' -setInstanceName ' + instanceName + ' -load ' \
         + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
-
+        scan['processingstate'].append(rccmdpathfield)
+        return scan
+    except subprocess.CalledProcessError as e:
+        print(e.output)
+        scan['processingstate'].append(rccmdpathfield + ' failed')
+        return scan
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
     commandlist.append(command)

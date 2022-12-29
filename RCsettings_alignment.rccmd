@@ -27,5 +27,7 @@
 -set "sfmDistortionModel= Brown3WithTangential2"
 -set "appQuitOnError=FALSE"
 -set "appQuitOnReset=FALSE"
+-set "CoordinateSystemWorkType=local:1 - Euclidean"
+-set "CoordinateSystemOutputType=local:1 - Euclidean"
 -save
 -quit

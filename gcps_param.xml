@@ -1,0 +1,11 @@
+<Configuration id="{65E79B42-7042-4A81-B68D-0F835D913191}">
+  <entry key="gcpuPosXl" value="0.001"/>
+  <entry key="csvGCIgn" value="true"/>
+  <entry key="gcpuPosZl" value="0.001"/>
+  <entry key="gcpTmode" value="0x1"/>
+  <entry key="CoordinateSystemGcpType" value="local:1 - Euclidean"/>
+  <entry key="CoordinateSystemGcp" value="+proj=geocent +ellps=WGS84 +no_defs"/>
+  <entry key="gcpLogFileFormat" value="{95EB0F80-BF22-4C4E-9DD9-C04C6C95E933}"/>
+  <entry key="gcpuPosYl" value="0.001"/>
+  <entry key="csvGCSep" value="1"/>
+</Configuration>
