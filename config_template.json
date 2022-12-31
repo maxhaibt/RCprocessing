@@ -4,6 +4,16 @@
     "messagepath": "E:/01_Digitization/VAM/99_useful/02_PG/01_RCMessages",
     "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/RCprocessing_test",
     "overwrite_dev-img": false,
-    "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment.rccmd"
+    "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment.rccmd",
+    "alignmentreport_template": "E:/GitHub/RCprocessing/AlignmentView.html",
+    "resume_processing": true,
+    "overwrite_dev-img": false,
+    "overwrite_imagelist": true,
+    "overwrite_all_rcproj": false,
+    "overwrite_alignment_rcproj": false,
+    "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment.rccmd",
+    "use_gcps": true,
+    "constantgcps": "",
+    "gcpsparamfile":"E:/GitHub/RCprocessing/gcps_param.xml"
 }
     
