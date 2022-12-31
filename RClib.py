@@ -73,7 +73,8 @@ def makeImagelist(scan, imagelistname, imagefield='dev-img_path'):
     #print(scan[imagefield])
     #imagelistpath.parent.mkdir(parents=True, exist_ok=True)
     if not imagelistpath.is_file() or imagelistpath.is_file() and config['overwrite_imagelist'] :
-        imagelistpath.unlink()
+        if imagelistpath.is_file():    
+            imagelistpath.unlink()
         imagelistpath.touch(exist_ok=True)
         with imagelistpath.open('a') as imagelistfile:
             for index, image in scan['imagedf'].iterrows():
