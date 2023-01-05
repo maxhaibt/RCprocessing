@@ -110,7 +110,8 @@ def missingInMaster(all, master):
 def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
     rccmdname = commandlistfield + '.rccmd'
     rccmdpath = scan['RCoutputfolder'] / rccmdname
-    rccmdpath.unlink()
+    if rccmdpath.is_file():
+        rccmdpath.unlink()
     rccmdpath.touch(exist_ok=True)
     with rccmdpath.open('a') as rccmds:
         for rccmd in scan[commandlistfield]:
