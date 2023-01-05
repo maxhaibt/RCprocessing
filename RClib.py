@@ -121,17 +121,29 @@ def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
         print(rccmdpath)
         scan[rccmdpathfield]=rccmdpath
     return scan
-def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'default'):
-    try:
-        subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
-         + ' -headless' + ' -setInstanceName ' + instanceName + ' -load ' \
-        + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
-        scan['processingstate'].append(rccmdpathfield)
-        return scan
-    except subprocess.CalledProcessError as e:
-        print(e.output)
-        scan['processingstate'].append(rccmdpathfield + ' failed')
-        return scan
+def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'default', headless=True):
+    if headless:
+        try:
+            subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
+            + ' -headless' + ' -setInstanceName ' + instanceName + ' -load ' \
+            + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
+            scan['processingstate'].append(rccmdpathfield)
+            return scan
+        except subprocess.CalledProcessError as e:
+            print(e.output)
+            scan['processingstate'].append(rccmdpathfield + ' failed')
+            return scan
+    if not headless:
+        try:
+            subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
+            + ' -setInstanceName ' + instanceName + ' -load ' \
+            + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
+            scan['processingstate'].append(rccmdpathfield)
+            return scan
+        except subprocess.CalledProcessError as e:
+            print(e.output)
+            scan['processingstate'].append(rccmdpathfield + ' failed')
+            return scan        
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
     commandlist.append(command)
