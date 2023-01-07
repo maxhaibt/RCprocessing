@@ -1,0 +1,12 @@
+<Configuration id="{033AEF62-8421-47A4-81CB-203741113577}">
+  <entry key="mvsFltUnwrapTexSide" value="0"/>
+  <entry key="mvsFltReprojectColor" value="true"/>
+  <entry key="mvsFltSimplificationType" value="0"/>
+  <entry key="mvsFltTargetTrisCountAbs" value="10000000"/>
+  <entry key="mvsFltUnwrapTexCount" value="0"/>
+  <entry key="mvsFltReprojectNormal" value="0"/>
+  <entry key="mvsFltMinEdgeLength" value="0.0"/>
+  <entry key="simplEqualizeDensity" value="true"/>
+  <entry key="mvsFltBorderDecimationStyle" value="1"/>
+  <entry key="simplPreserveParts" value="2"/>
+</Configuration>

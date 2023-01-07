@@ -11,9 +11,12 @@
     "overwrite_alignment_rcproj": true,
     "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment.rccmd",
     "reconstructsettings": "E:/GitHub/RCprocessing/RCsettings_reconstruction.rccmd",
+    "texturingsettings": "E:/GitHub/RCprocessing/RCsettings_texturing.rccmd",
     "use_gcps": true,
     "constantgcps": "",
     "gcpsparamfile":"E:/GitHub/RCprocessing/gcps_param.xml",
-    "baseimageformat":"*.dng"
+    "baseimageformat":"*.dng",
+    "devimage_param":" -b8 -tz ",
+    "devimage_format": ".tif"
 }
     

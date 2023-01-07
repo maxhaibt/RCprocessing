@@ -1,0 +1,6 @@
+<Configuration id="{585E749B-DC69-4D8C-9114-FA8CBB6F88F3}">
+  <entry key="smoothIterations" value="10"/>
+  <entry key="mvsFltSmoothingStyle" value="3"/>
+  <entry key="smoothWeight" value="0.02"/>
+  <entry key="mvsFltSmoothingType" value="0"/>
+</Configuration>

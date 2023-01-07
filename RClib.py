@@ -49,6 +49,11 @@ def defineRealityCaptureOutput(series, foldername=''):
     series['RCoutputfolder'].mkdir(exist_ok=True)
     return series
 
+def defineResultOutput(series, foldername=''):
+    series['Resultoutputfolder'] = Path(config['workspace']) / series['id'] / foldername
+    series['Resultoutputfolder'].mkdir(exist_ok=True)
+    return series
+
 def developwithRawTherapee(imageseries, pp3filepath , outputfolderpath, inputrawimagepathfield = 'rawimg_path', outputdevimagepathfield='dev-img_path'):
     outfile = outputfolderpath / Path(str(imageseries[inputrawimagepathfield].stem) + config['devimage_format'])
     if not outfile.is_file() or outfile.is_file() and config['overwrite_dev-img'] :
