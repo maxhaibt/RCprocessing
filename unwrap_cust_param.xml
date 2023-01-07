@@ -1,0 +1,11 @@
+<Configuration id="{54A4029C-DE57-43F6-8F81-75C62E159021}">
+  <entry key="unwrapCheckerBoardCellSize" value="64"/>
+  <entry key="unwrapButtonDisabled" value="0"/>
+  <entry key="unwrapGutter" value="2"/>
+  <entry key="unwrapFixedTexelSizeType" value="5"/>
+  <entry key="unwrapFixedTexelSize" value="0.033221"/>
+  <entry key="unwrapStyle" value="FixedTexelSize"/>
+  <entry key="unwrapFillTextures" value="0x1"/>
+  <entry key="unwrapMaxTexResolution" value="8192"/>
+  <entry key="unwrapLargeTriangleRemovalThr" value="1000"/>
+</Configuration>
