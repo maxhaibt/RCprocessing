@@ -23,7 +23,7 @@ config = loadconfigs('.\config.json')
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
     for scan_id in Path(inputdirectory).iterdir():
-        if scan_id.is_dir():
+        if scan_id.is_dir() and not scan_id in config['excludescanids']:
             scan = {}
             scan['id']= scan_id.stem
             scan['processingstate'] = []
