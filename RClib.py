@@ -50,13 +50,13 @@ def defineRealityCaptureOutput(series, foldername=''):
     return series
 
 def developwithRawTherapee(imageseries, pp3filepath , outputfolderpath, inputrawimagepathfield = 'rawimg_path', outputdevimagepathfield='dev-img_path'):
-    outfile = outputfolderpath / Path(str(imageseries[inputrawimagepathfield].stem + '.png') )
+    outfile = outputfolderpath / Path(str(imageseries[inputrawimagepathfield].stem) + config['devimage_format'])
     if not outfile.is_file() or outfile.is_file() and config['overwrite_dev-img'] :
         if imageseries['rawimg_path'].is_file():
             print('Inputfile: ', imageseries['rawimg_path'])
             print('Expect file: ', outfile)
         subprocess.check_output( '"' + str(config['RTpath']) + '"' \
-             + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + ' -n' + ' -q ' +  ' -Y ' \
+             + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + config['devimage_param']+ ' -q ' +  ' -Y ' \
             + '-p ' + '"' + str(Path(pp3filepath).as_posix()) + '"' + \
              ' -c '  +  '"' + str(imageseries['rawimg_path']) +  '"' \
              ) 
