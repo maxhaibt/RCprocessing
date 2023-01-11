@@ -1,0 +1,50 @@
+<Configuration id="{96BADAB2-151E-4398-86C1-4218BA7F9726}">
+  <entry key="sgFps" value="25"/>
+  <entry key="appCacheImageMetadata" value="FASLE"/>
+  <entry key="appAutoClearCache" value="999999"/>
+  <entry key="appTutorialMode" value="false"/>
+  <entry key="appLog" value="true"/>
+  <entry key="startColorAndTexture" value="PerVertexColor"/>
+  <entry key="appMaxPointsToDisplay" value="10000000"/>
+  <entry key="v2Dflt-cp-maxAdd" value="150.0"/>
+  <entry key="appCopyImportedComponentsToCache" value="false"/>
+  <entry key="startRecMode" value="Normal"/>
+  <entry key="appAutoSaveMode" value="false"/>
+  <entry key="v2Dflt-cp-roiSize" value="0.33f"/>
+  <entry key="ssACLRw" value=""/>
+  <entry key="appProcessActionTime" value="15"/>
+  <entry key="appAutoUpdate" value="false"/>
+  <entry key="appCacheLocation" value="Custom"/>
+  <entry key="licEnDelHKCU" value="0"/>
+  <entry key="sgVideoRes" value="720pHDReady"/>
+  <entry key="licEnDelHKLM" value="1"/>
+  <entry key="ssOverInet" value="true"/>
+  <entry key="appNavigationStyle" value="Default"/>
+  <entry key="CoordinateSystemWorkType" value="local:1 - Euclidean"/>
+  <entry key="CoordinateSystemOutputType" value="local:1 - Euclidean"/>
+  <entry key="startAlignMode" value="Normal"/>
+  <entry key="startSelectComponents" value="GreatestOne"/>
+  <entry key="startReconRegion" value="Automatic"/>
+  <entry key="capAudioBitRate" value="0"/>
+  <entry key="sgOutputFolderPath" value=""/>
+  <entry key="operationLog" value="true"/>
+  <entry key="v2Dflt-cp-maxMul" value="10.0"/>
+  <entry key="sgFilePrefix" value="video"/>
+  <entry key="appUIAnim" value="true"/>
+  <entry key="v2Dflt-cp-auto" value="-1"/>
+  <entry key="ssACLRo" value=""/>
+  <entry key="ssProgNotify" value="false"/>
+  <entry key="UserInterfaceLanguageId" value="1033"/>
+  <entry key="appThemeZoom" value="0"/>
+  <entry key="appCacheCustomLocation" value="E:\oldtexture_cache"/>
+  <entry key="sgStopOnFinish" value="false"/>
+  <entry key="sgBitRate" value="2500kbps"/>
+  <entry key="appGroupCalibrationByExif" value="false"/>
+  <entry key="appIgnoreExifGPS" value="true"/>
+  <entry key="sgCodec" value="WindowsMediaVideo"/>
+  <entry key="sgPlaySounds" value="true"/>
+  <entry key="appProcessAction" value="None"/>
+  <entry key="v2Dflt-cp-enb" value="true"/>
+  <entry key="CoordinateSystemWork" value="+proj=geocent +ellps=WGS84 +no_defs"/>
+  <entry key="CoordinateSystemOutput" value="+proj=geocent +ellps=WGS84 +no_defs"/>
+</Configuration>

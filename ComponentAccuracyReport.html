@@ -1,0 +1,1087 @@
+﻿$Using( "CapturingReality.Report.ProjectInformationExportFunctionSet" )
+$Using( "CapturingReality.Report.LocalizationExportFunctionSet" )
+$Using( "CapturingReality.Report.IteratorsFunctionSet" )
+$Using( "CapturingReality.Report.SfmExportFunctionSet" )
+$Using( "CapturingReality.Report.ControlPointsExportFunctionSet" )
+$Using( "CapturingReality.Report.ComponentFunctionSet" )
+$Using( "CapturingReality.Report.MapExportFunctionSet" )
+$Using( "CapturingReality.Report.RelativeCameraUncertaintyFunctionSet" )
+$Using( "CapturingReality.Report.InputsFunctionSet" )
+$Using( "CapturingReality.Report.SfmHistogramExportFunctionSet" )
+$Using( "CapturingReality.Report.HelperFunctionSet" )
+<html>
+$EchoOff(
+
+$Declare( "noPriorShapeColor", "#40f0ff" )
+$Declare( "unalignedShapeColor", "#ddd" )
+$Declare( "lvl0Color", "#4cff00" ) $Declare( "lvl0ColorBright", "#a0ffa0" )
+
+$Declare( "lvl1", 1 )   $Declare( "lvl1Color", "#fff040" ) $Declare( "lvl1ColorBright", "#fff0a0" )
+$Declare( "lvl2", 1.5 ) $Declare( "lvl2Color", "#ff8040" ) $Declare( "lvl2ColorBright", "#ffa0a0" )
+$Declare( "lvl3", 2 )   $Declare( "lvl3Color", "#ff1040" ) $Declare( "lvl3ColorBright", "#ff80a0" )
+
+$Declare( "histMinErr", 0.005 )
+$Declare( "histMaxErr", 0.105 )
+$Declare( "histStepCount", 20 )
+$Declare( "histMinStep", 0.005 )
+$Declare( "histWidth", 740 )
+$Declare( "histHeight", 220 )
+$Declare( "histLeftPadding", 60 )
+$Declare( "histRightPadding", 10 )
+$Declare( "histTopPadding", 10 )
+$Declare( "histBottomPadding", 50 )
+$Declare( "histYLabelsCount", 5 )
+$Declare( "histDataHeight", histHeight-histBottomPadding-histTopPadding )
+$Declare( "histDataWidth", histWidth-histLeftPadding-histRightPadding )
+
+
+// Map settings
+
+$Declare( "mapWidth", 780 )
+$Declare( "mapHeight", 500 )
+$Declare( "mapImageFile", "map.jpg" )
+
+$Declare( "mapLegendWidth", 100 )
+
+$Declare( "mapSize", Min( mapWidth, mapHeight ) )
+
+
+// Set uncertainty ellipse scale
+
+$Declare( "camPosRadius", 2 )
+
+// Make ellipse size adapt to density of cameras
+$Declare( "minMaxEllipsePxRadius", camPosRadius + 6 )
+$Declare( "maxMaxEllipsePxRadius", Max( minMaxEllipsePxRadius, mapSize * 1 / 4 ) )
+
+$Declare( "maxEllipsePxRadius", 0 )
+$ExportProjectInfo( $ComponentInfo( actualComponentGUID,
+    // Sqrt(1/componentCameraCount) is factor that represents camera density
+    $Set( "maxEllipsePxRadius", Sqrt(1/componentCameraCount) * ( maxMaxEllipsePxRadius - minMaxEllipsePxRadius ) + minMaxEllipsePxRadius )
+))
+
+$Declare( "maxEllipseUnitRadius", Max( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $CovToEllipse2D( posUncertCovXX, posUncertCovXY, posUncertCovYY, $(ellipseRadiusMax), ))) 0 ) )
+
+$Declare( "mapPadding", maxEllipsePxRadius ) // Prevent elipses exceeding map borders
+
+
+$Declare( "mapMaxX", -1e+10 )
+$Declare( "mapMinX",  1e+10 )
+$Declare( "mapMaxY", -1e+10 )
+$Declare( "mapMinY",  1e+10 )
+
+$If(!isCoordSystemLatLon,
+
+    // euclidean case
+
+    // calculate images/cameras bounding boxes
+    $Set( "mapMaxX", Max( $ExportCameras( $(x),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputXOutCS),))) mapMaxX) )
+    $Set( "mapMinX", Min( $ExportCameras( $(x),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputXOutCS),))) mapMinX) )
+    $Set( "mapMaxY", Max( $ExportCameras( $(y),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputYOutCS),))) mapMaxY) )
+    $Set( "mapMinY", Min( $ExportCameras( $(y),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputYOutCS),))) mapMinY) )
+
+    // update bbox using gcp
+    $Set( "mapMaxX", Max( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualX),$(x),)) mapMaxX) )
+    $Set( "mapMinX", Min( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualX),$(x),)) mapMinX) )
+    $Set( "mapMaxY", Max( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualY),$(y),)) mapMaxY) )
+    $Set( "mapMinY", Min( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualY),$(y),)) mapMinY) )
+)
+
+$If(isCoordSystemLatLon,
+
+    // convert to pseudo-mercator for lat/lon
+
+    // calculate images/cameras bounding boxes
+    $Set( "mapMaxX", Max( $ExportCameras( $(lon),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputLonOutCS),))) mapMaxX) )
+    $Set( "mapMinX", Min( $ExportCameras( $(lon),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputLonOutCS),))) mapMinX) )
+    $Set( "mapMaxY", Max( $ExportCameras( $(lat),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputLatOutCS),))) mapMaxY) )
+    $Set( "mapMinY", Min( $ExportCameras( $(lat),) $IterateImages($ExportImagePriors(inputIndex,$If(inputIsPositionPrior,$(inputLatOutCS),))) mapMinY) )
+
+    // update bbox using gcp
+    $Set( "mapMaxX", Max( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualLon),$(lon),)) mapMaxX) )
+    $Set( "mapMinX", Min( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualLon),$(lon),)) mapMinX) )
+    $Set( "mapMaxY", Max( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualLat),$(lat),)) mapMaxY) )
+    $Set( "mapMinY", Min( $ExportControlPoints( $If( isGroundControl && isAligned,$(actualLat),$(lat),)) mapMinY) )
+)
+
+// set result map bounds
+$Set( "mapMaxX", mapMinX + ((mapMaxX-mapMinX)*(mapWidth / (mapWidth-mapLegendWidth))) )
+$Declare( "mapMidX", (mapMaxX + mapMinX) / 2 )
+$Declare( "mapMidY", (mapMaxY + mapMinY) / 2 )
+$Declare( "mapScaleX_", mapWidth / (mapWidth-mapPadding*2) )
+$Declare( "mapScaleY_", mapHeight / (mapHeight-mapPadding*2) )
+
+$Set( "mapMinX", (mapMinX - mapMidX) * mapScaleX_ + mapMidX )
+$Set( "mapMaxX", (mapMaxX - mapMidX) * mapScaleX_ + mapMidX )
+$Set( "mapMinY", (mapMinY - mapMidY) * mapScaleY_ + mapMidY )
+$Set( "mapMaxY", (mapMaxY - mapMidY) * mapScaleY_ + mapMidY )
+
+$Declare( "useExportedMap", false )
+
+$If(isCoordSystemLatLon,
+
+    $If( !MapProviderCredentialsAreNeeded("Mapbox Satellite") || MapProviderCredentialsAreValid("Mapbox Satellite"),
+        $ExportMap( "Mapbox Satellite", mapImageFile, mapMinX, mapMaxX, mapMinY, mapMaxY, mapWidth, mapHeight )
+        $Set( "useExportedMap", true )
+    )
+    $If( !useExportedMap && ( !MapProviderCredentialsAreNeeded("OpenStreet DE") || MapProviderCredentialsAreValid("OpenStreet DE") ),
+        $ExportMap( "OpenStreet DE", mapImageFile, mapMinX, mapMaxX, mapMinY, mapMaxY, mapWidth, mapHeight )
+        $Set( "useExportedMap", true )
+    )
+    $If( useExportedMap,
+        $GetExportedMapInfo( mapImageFile,
+            $Set( "mapMinX", ToPseudoMercatorLon( exportedWest ) )
+            $Set( "mapMaxX", ToPseudoMercatorLon( exportedEast ) )
+            $Set( "mapMinY", ToPseudoMercatorLat( exportedNorth ) )
+            $Set( "mapMaxY", ToPseudoMercatorLat( exportedSouth ) )
+        )
+    )
+    $If(!useExportedMap,
+            $Set( "mapMinX", ToPseudoMercatorLon( mapMinX ) )
+            $Set( "mapMaxX", ToPseudoMercatorLon( mapMaxX ) )
+            $Set( "mapMinY", ToPseudoMercatorLat( mapMinY ) )
+            $Set( "mapMaxY", ToPseudoMercatorLat( mapMaxY ) )
+    )
+)
+
+// calculate fit to image factors
+$Declare( "mapScale", mapWidth/(mapMaxX-mapMinX) )
+$Declare( "mapScaleY", mapHeight/(mapMaxY-mapMinY) )
+$If( mapScale > mapScaleY, $Set( "mapScale", mapScaleY ) )
+$Declare( "mapOfsX", mapWidth/2 - (mapMaxX+mapMinX)/2*mapScale )
+$Declare( "mapOfsY", mapHeight/2 - (mapMaxY+mapMinY)/2*mapScale )
+
+)
+<head>
+    <meta name="GENERATOR" content="Epic Games Slovakia s.r.o." />
+    <meta charset="UTF-8">
+    <title>RealityCapture Component Registration Report</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=10" />
+    <style>
+                $Include("Reports\styles\style.css")
+                $Include("Reports\styles\colors.css")
+                $Include("Reports\styles\svg.css")
+                $If(useExportedMap, .map {
+            position: relative;
+            display: inline-block; /* <= shrinks container to image size */
+        } .map img {
+            display: block;
+            width: $(mapWidth);
+            height: $(mapHeight);
+            margin: 0px;
+            object-fit: none;
+        } .map svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+        } )
+    </style>
+</head>
+<body>
+    $ExportProjectInfo(
+
+    $IfFileExists("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_compaccrep.xml", $SetLocalization("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_compaccrep.xml"))
+    $IfFileNotExists("$(programDataLangPackFolder)\\Reports\\$(appLanguage)\\loc_compaccrep.xml", $SetLocalization("Reports\\$(appLanguage)\\loc_compaccrep.xml"))
+
+    <h1>$Localize("CAR_COMP_REG_REPORT", "Component Registration Report")</h1>
+
+    $ComponentInfo( actualComponentGUID, $ComponentSettings( actualComponentGUID, $ExportInputsGrouping(
+    <header>
+        <p class="projectName">$Localize("CAR_PROJECT", "Project"): <em>$(projectName)</em></p>
+        <h2>$(dateTime)</h2>
+        <h2>RealityCapture <b>$(appVersion)</b></h2>
+    </header>
+
+    <div>
+        <table class="propertiesTable">
+            <tr>
+                <th>$Localize("CAR_COMP_NAME", "Component Name")</th>
+                <td>$(componentName)</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_CAM_COUNT", "Camera Count")</th>
+                <td>$(componentCameraCount) / $(imageCount)</td>
+                <th>$Localize("CAR_ENGINE", "Engine")</th>
+                <td>$(componentAlignmentEngine) / $(componentAlignmentMode) / $Localize("CAR_DOWNSCALE", "Downscale") $(componentImageDownscaleFactor)x</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_AUT_POINT_COUNT", "Automatic Point Count")</th>
+                <td>$(componentPointCount)</td>
+                <th>$Localize("CAR_FEAT_PRES_SENS", "Features / Pre-selector / Sensitivity")</th>
+                <td>$(componentMaxFeaturesPerImage) / $(componentPreselectorFeatures) / $(componentDetectorSensitivity)</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_CP_POINT_COUNT", "Control Point Count")</th>
+                <td>$(componentControlPointCountUsed)</td>
+                <th>$Localize("CAR_MAX_REPR_ERROR", "Max Re-projection Error")</th>
+                <td>$(componentMaxFeatureReprojectionError:.2f)</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_CONS_USED", "Constraints Used")</th>
+                <td>$(componentConstraintCountUsed)</td>
+                <th>$Localize("CAR_LENS_MODEL", "Lens Model")</th>
+                <td>$(componentLensDistortionModel)</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_USE_CAM_POS", "Use Camera Positions")</th>
+                <td>$(componentUseCameraPositions)</td>
+                <th>$Localize("CAR_FINAL_OPT", "Final Optimization")</th>
+                <td>$(componentFinalOptimization)</td>
+            </tr>
+            <tr>
+                <th>$Localize("CAR_OUT_COORD_SYS", "Output Coordinate System")</th>
+                <td>$(coordSystemName)</td>
+                <th>$Localize("CAR_CAM_GROUPS_NUM", "Camera Groups Count")</th>
+                <td>
+                    $If(groupedInputCount==0,$Localize("CAR_ALL_INP_REG_IND", "all inputs are registered independently"))
+                    $If(groupedInputCount>0,$(groupCount)$If(ungroupedInputCount>0, / $(ungroupedInputCount) $Localize("CAR_INP_NOT_GROUPED", "inputs not grouped") ))
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    $If(groupCount>0,
+
+    <h2 style="text-align:left">$Localize("CAR_CALIB_GROUPS", "Calibration Groups")</h2>
+    <p>
+        $Localize("CAR_SHARE_INT_PARAMS", "Input images are sharing internal calibration parameters in the following groups"):
+    </p>
+
+    <table class="listTable" width="100%">
+        <tr align="center">
+            <td rowspan="2">$Localize("CAR_CAM_LENS_MODEL", "Camera and Lens Model")</td>
+            <td rowspan="2">$Localize("CAR_RESOLUTION", "Resolution")</td>
+            <td colspan="13">$Localize("CAR_CALIB_DIST", "Calibration and Distortion")</td>
+            <td rowspan="2">$Localize("CAR_SIZE", "Size")</td>
+        </tr>
+        <tr align="center">
+            <td>State</td>
+            <td>F [px]</td>
+            <td>PX [px]</td>
+            <td>PY [px]</td>
+            <td>Ratio</td>
+            <td>Skew</td>
+
+            <td>Model</td>
+            <td>K1</td>
+            <td>K2</td>
+            <td>K3</td>
+            <td>K4</td>
+            <td>T1</td>
+            <td>T2</td>
+        </tr>
+        $IterateGroups(
+        <tr>
+            <td rowspan="2">$(cameraModel)$If(lensModel,$(lensModel))</td>
+            <td rowspan="2">$(refWidth)x$(refHeight)</td>
+            <td>$Localize("CAR_PRIOR", "Prior")</td>
+            $ExportImagePriors(refImageIndex,$Declare("scale",Max($(refWidth),$(refHeight)))
+            <td>$(inputF/36*scale:.2f)</td>
+            <td>$(inputPX/36*scale:.2f)</td>
+            <td>$(inputPY/36*scale:.2f)</td>
+            <td>$(inputAspect:.1f)</td>
+            <td>$(inputSkew:.1f)</td>
+
+            <td>$(inputLensModel)</td>
+            <td>$(inputK1:.4f)</td>
+            <td>$(inputK2:.4f)</td>
+            <td>$(inputK3:.4f)</td>
+            <td>$(inputK4:.4f)</td>
+            <td>$(inputT1:.4f)</td>
+            <td>$(inputT2:.4f)</td>)
+            <td rowspan="2">$(count)</td>
+        </tr>
+        <tr>
+            <td>$Localize("CAR_OPTIMIZED", "Optimized")</td>
+            $ExportCamera(GetImageCamera(refImageIndex),
+            <td>$(f*scale:.2f)</td>
+            <td>$(px*scale:.2f)</td>
+            <td>$(py*scale:.2f)</td>
+            <td>$(aspect:.1f)</td>
+            <td>$(skew:.1f)</td>
+
+            <td>$(componentLensDistortionModel)</td>
+            <td>$(k1:.4f)</td>
+            <td>$(k2:.4f)</td>
+            <td>$(k3:.4f)</td>
+            <td>$(k4:.4f)</td>
+            <td>$(t1:.4f)</td>
+            <td>$(t2:.4f)</td>
+        </tr>)
+        )
+    </table>
+    <br />
+    )
+    ))
+
+    $EchoOff(
+
+    // collect statistics
+
+    $Declare( "gcpCount", 0 )
+
+    $ExportControlPoints(
+    $If( isGroundControl && isAligned,
+    $Set( "gcpCount", gcpCount + 1 )
+    )
+    )
+
+    )
+    $If(gcpCount > 0,
+    <h2 style="text-align:left">$Localize("CAR_CPS", "Control Points")</h2>
+    <p>
+        $Localize("CAR_TABLE_ACC_REP", "The following table shows the accuracy report for all ground or test control points with their assigned prior value.")
+    </p>
+    <table class="listTable" width="100%">
+        <tr align="center">
+            <td>$Localize("CAR_NAME", "Name")</td>
+            <td>$Localize("CAR_TYPE", "Type")</td>
+            $If(isCoordSystemLatLon,
+            <td>$Localize("CAR_LATITUDE", "Latitude") [&#176;]</td>
+            <td>$Localize("CAR_LONGITUDE", "Longitude") [&#176;]</td>
+            <td>$Localize("CAR_ALTITUDE", "Altitude") [$(unitsShort)]</td>
+            <td>$Localize("CAR_CAL_LATITUDE", "Cal. Latitude") [&#176;]</td>
+            <td>$Localize("CAR_CAL_LONGITUDE", "Cal. Longitude") [&#176;]</td>
+            <td>$Localize("CAR_CAL_ALTITUDE", "Cal. Altitude") [$(unitsShort)]</td>)
+            $If(!isCoordSystemLatLon,
+            <td>X [$(unitsShort)]</td>
+            <td>Y [$(unitsShort)]</td>
+            <td>Z [$(unitsShort)]</td>
+            <td>Cal. X [$(unitsShort)]</td>
+            <td>Cal. Y [$(unitsShort)]</td>
+            <td>Cal. Z [$(unitsShort)]</td>)
+            <td>dX [$(unitsShort)]</td>
+            <td>dY [$(unitsShort)]</td>
+            <td>dZ [$(unitsShort)]</td>
+        </tr>
+        $EchoOff(
+        $Declare( "cpxMean", 0 )
+        $Declare( "cpyMean", 0 )
+        $Declare( "cpzMean", 0 )
+        $Declare( "cpxMeanAcc", 0 )
+        $Declare( "cpyMeanAcc", 0 )
+        $Declare( "cpzMeanAcc", 0 )
+        )
+        $ExportControlPoints( $If( isGroundControl && isAligned,
+        <tr align="right">
+            <td>$(name)</td>
+            <td>$If(isGroundTest,Test)$If(isGroundTest==0,GCP)</td>
+            $If(!isCoordSystemLatLon,
+            <td>$(x:.3f) <sub>+/-$(inAccuracyX*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(y:.3f) <sub>+/-$(inAccuracyY*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(z:.3f) <sub>+/-$(inAccuracyZ*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(actualX:.3f)</td>
+            <td>$(actualY:.3f)</td>
+            <td>$(actualZ:.3f)</td>)
+            $If(isCoordSystemLatLon,
+            <td>$(lat:.8f) <sub>+/-$(inAccuracyY*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(lon:.8f) <sub>+/-$(inAccuracyX*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(alt:.3f) <sub>+/-$(inAccuracyZ*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(actualLat:.8f)</td>
+            <td>$(actualLon:.8f)</td>
+            <td>$(actualAlt:.3f)</td>)
+            $ControlPointError(index,
+            <td bgcolor="$Map(Abs(cpErrorX),"",inAccuracyX*lvl1,"$(lvl1Color)",inAccuracyX*lvl2,"$(lvl2Color)",inAccuracyX*lvl3,"$(lvl3Color)")">$(cpErrorX*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpErrorY),"",inAccuracyY*lvl1,"$(lvl1Color)",inAccuracyY*lvl2,"$(lvl2Color)",inAccuracyY*lvl3,"$(lvl3Color)")">$(cpErrorY*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpErrorZ),"",inAccuracyZ*lvl1,"$(lvl1Color)",inAccuracyZ*lvl2,"$(lvl2Color)",inAccuracyZ*lvl3,"$(lvl3Color)")">$(cpErrorZ*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</td>
+            $EchoOff(
+            $Set( "cpxMean", cpxMean+cpErrorX*inputCSUnitToMeter )
+            $Set( "cpyMean", cpyMean+cpErrorY*inputCSUnitToMeter )
+            $Set( "cpzMean", cpzMean+cpErrorZ*inputCSUnitToMeter )
+            $Set( "cpxMeanAcc", cpxMeanAcc+inAccuracyX*inputCSUnitToMeter )
+            $Set( "cpyMeanAcc", cpyMeanAcc+inAccuracyY*inputCSUnitToMeter )
+            $Set( "cpzMeanAcc", cpzMeanAcc+inAccuracyZ*inputCSUnitToMeter )
+            ) )
+        </tr>
+        ) )
+        $If(gcpCount > 1,
+        $EchoOff(
+        $Set( "cpxMean", cpxMean/gcpCount )
+        $Set( "cpyMean", cpyMean/gcpCount )
+        $Set( "cpzMean", cpzMean/gcpCount )
+        $Set( "cpxMeanAcc", cpxMeanAcc/gcpCount )
+        $Set( "cpyMeanAcc", cpyMeanAcc/gcpCount )
+        $Set( "cpzMeanAcc", cpzMeanAcc/gcpCount ))
+        <tr align="right">
+            <td colspan="7"></td>
+            <td>$Localize("CAR_MEAN", "Mean")</td>
+            <td bgcolor="$Map(Abs(cpxMean),"",lvl1*cpxMeanAcc,"$(lvl1Color)",lvl2*cpxMeanAcc,"$(lvl2Color)",lvl3*cpxMeanAcc,"$(lvl3Color)")">$(cpxMean/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpyMean),"",lvl1*cpyMeanAcc,"$(lvl1Color)",lvl2*cpyMeanAcc,"$(lvl2Color)",lvl3*cpyMeanAcc,"$(lvl3Color)")">$(cpyMean/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpzMean),"",lvl1*cpzMeanAcc,"$(lvl1Color)",lvl2*cpzMeanAcc,"$(lvl2Color)",lvl3*cpzMeanAcc,"$(lvl3Color)")">$(cpzMean/coordSystemUnit2Meter:.3f)</td>
+        </tr>
+        $EchoOff(
+
+        $Declare( "cpxStd", 0 )
+        $Declare( "cpyStd", 0 )
+        $Declare( "cpzStd", 0 )
+
+        $ExportControlPoints(
+        $If( isGroundControl && isAligned,
+        $ControlPointError(index,
+        $Set( "cpxStd", cpxStd + (cpErrorX*inputCSUnitToMeter-cpxMean)*(cpErrorX*inputCSUnitToMeter-cpxMean) )
+        $Set( "cpyStd", cpyStd + (cpErrorY*inputCSUnitToMeter-cpyMean)*(cpErrorY*inputCSUnitToMeter-cpyMean) )
+        $Set( "cpzStd", cpzStd + (cpErrorZ*inputCSUnitToMeter-cpzMean)*(cpErrorZ*inputCSUnitToMeter-cpzMean) )
+        )
+        )
+        )
+        $Set( "cpxStd", Sqrt(cpxStd/(gcpCount)) )
+        $Set( "cpyStd", Sqrt(cpyStd/(gcpCount)) )
+        $Set( "cpzStd", Sqrt(cpzStd/(gcpCount)) )
+        )
+        <tr align="right">
+            <td colspan="7"></td>
+            <td>$Localize("CAR_STANDARD_DEVIATION_ABBR", "Std")</td>
+            <td bgcolor="$Map(Abs(cpxStd),"",lvl1*cpxMeanAcc,"$(lvl1Color)",lvl2*cpxMeanAcc,"$(lvl2Color)",lvl3*cpxMeanAcc,"$(lvl3Color)")">$(cpxStd/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpyStd),"",lvl1*cpyMeanAcc,"$(lvl1Color)",lvl2*cpyMeanAcc,"$(lvl2Color)",lvl3*cpyMeanAcc,"$(lvl3Color)")">$(cpyStd/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpzStd),"",lvl1*cpzMeanAcc,"$(lvl1Color)",lvl2*cpzMeanAcc,"$(lvl2Color)",lvl3*cpzMeanAcc,"$(lvl3Color)")">$(cpzStd/coordSystemUnit2Meter:.3f)</td>
+        </tr>
+
+        $EchoOff(
+
+        $Declare( "cpxRMS", 0 )
+        $Declare( "cpyRMS", 0 )
+        $Declare( "cpzRMS", 0 )
+
+        $ExportControlPoints(
+        $If( isGroundControl && isAligned,
+        $ControlPointError(index,
+        $Set( "cpxRMS", cpxRMS + (cpErrorX*inputCSUnitToMeter)*(cpErrorX*inputCSUnitToMeter) )
+        $Set( "cpyRMS", cpyRMS + (cpErrorY*inputCSUnitToMeter)*(cpErrorY*inputCSUnitToMeter) )
+        $Set( "cpzRMS", cpzRMS + (cpErrorZ*inputCSUnitToMeter)*(cpErrorZ*inputCSUnitToMeter) )
+        )
+        )
+        )
+        $Set( "cpxRMS", Sqrt(cpxRMS/(gcpCount)) )
+        $Set( "cpyRMS", Sqrt(cpyRMS/(gcpCount)) )
+        $Set( "cpzRMS", Sqrt(cpzRMS/(gcpCount)) )
+        )
+        <tr align="right">
+            <td colspan="7"></td>
+            <td>RMSE</td>
+            <td bgcolor="$Map(Abs(cpxRMS),"",lvl1*cpxMeanAcc,"$(lvl1Color)",lvl2*cpxMeanAcc,"$(lvl2Color)",lvl3*cpxMeanAcc,"$(lvl3Color)")">$(cpxRMS/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpyRMS),"",lvl1*cpyMeanAcc,"$(lvl1Color)",lvl2*cpyMeanAcc,"$(lvl2Color)",lvl3*cpyMeanAcc,"$(lvl3Color)")">$(cpyRMS/coordSystemUnit2Meter:.3f)</td>
+            <td bgcolor="$Map(Abs(cpzRMS),"",lvl1*cpzMeanAcc,"$(lvl1Color)",lvl2*cpzMeanAcc,"$(lvl2Color)",lvl3*cpzMeanAcc,"$(lvl3Color)")">$(cpzRMS/coordSystemUnit2Meter:.3f)</td>
+        </tr>
+        )
+    </table>
+    <figcaption>$Localize("CAR_FIG_COLOR_CODE", "Table cells are color-coded based on achieved accuracy. See <a href='#errorCoding'>legend</a> below.")</figcaption>
+    )
+    <br />
+
+    $EchoOff(
+
+    $Declare( "inpHistAcc", 1 )
+    $Declare( "inpHistCnt", 0 )
+
+    $ExportCameras(
+
+    $ExportImagePriors(originalImageIndex,
+    $If(inputIsPositionPrior,
+
+    $Set( "inpHistAcc", inpHistAcc + inputCSUnitToMeter * Sqrt(inputAccuracyX*inputAccuracyX + inputAccuracyY*inputAccuracyY + inputAccuracyZ*inputAccuracyZ) )
+    $Set( "inpHistCnt", inpHistCnt + 1 )
+    $Max( "histMaxErr", histMaxErr, priorError3D*inputCSUnitToMeter )
+    )
+    )
+    )
+
+    $Declare( "notgeorefCameraCount", componentCameraCount-inpHistCnt )
+    $Declare( "georefCameraCount", inpHistCnt )
+    $Declare( "georefImageCount", 0 )
+
+    $IterateImages(
+    $If(!inputIsAligned,
+    $ExportImagePriors(inputIndex,
+    $Set( "georefImageCount", georefImageCount + inputIsPositionPrior )
+    )
+    )
+    )
+    $If(inpHistCnt > 0,
+
+    $Set( "inpHistAcc", inpHistAcc / inpHistCnt )
+    $Set( "histMaxErr", histMaxErr*1.1 + histMinErr )
+    $If( (histMaxErr-histMinErr)/histStepCount < histMinStep, $Max("histStepCount", (histMaxErr-histMinErr)/histMinStep, 5) )
+    )
+    )
+    $If(gcpCount+georefCameraCount+georefImageCount>0,
+    <h2 style="text-align:left">$Localize("CAR_CAM_POS", "Camera Position")</h2>
+
+    <!-- camera prior position deviation histogram -->
+    $If(inpHistCnt>0, $CreateHistogram(histMinErr, histStepCount, histMaxErr,
+    $EchoOff(
+
+    $Declare( "histColumnWidth", histDataWidth / (histStepCount-1) )
+
+    $ExportCameras(
+    $ExportImagePriors(originalImageIndex,
+    $If(inputIsPositionPrior,
+    $AddData( priorError3D*inputCSUnitToMeter )
+    )
+    )
+    )
+    )
+    <p>
+        $Localize("CAR_HIST_3D_DEV", "The following histogram shows the number of cameras (Y-axis) whose total 3D deviation to the prior is within values on the X-axis.
+        Histogram bins are colored as described in <a href='#errorCoding'>legend</a> below with the accuracy threshold set to")$(inpHistAcc/coordSystemUnit2Meter:.2f) $(unitsShort).
+    </p>
+
+    <div>
+        <svg id="svgHist" class="histogram" width="$(histWidth)" height="$(histHeight)">
+            <defs>
+                <linearGradient id="Gradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="$(lvl0Color)" />
+                    <stop offset="100%" stop-color="$(lvl0ColorBright)" />
+                </linearGradient>
+                <linearGradient id="GradientLvl1" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="$(lvl1Color)" />
+                    <stop offset="100%" stop-color="$(lvl1ColorBright)" />
+                </linearGradient>
+                <linearGradient id="GradientLvl2" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="$(lvl2Color)" />
+                    <stop offset="100%" stop-color="$(lvl2ColorBright)" />
+                </linearGradient>
+                <linearGradient id="GradientLvl3" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="$(lvl3Color)" />
+                    <stop offset="100%" stop-color="$(lvl3ColorBright)" />
+                </linearGradient>
+            </defs>
+            <g id="axis-y" transform="translate(0,0)">
+                <text x="0" y="50%" dominant-baseline="middle" text-anchor="middle" transform="rotate(270,0,$(histHeight/2)) translate(0,10)">$Localize("CAR_CAM_COUNT","Camera Count")</text>
+                <g id="axis-y-lines" font-size="10" font-family="sans-serif" text-anchor="end" transform="translate($(histLeftPadding-1),$(histTopPadding-1))">
+                    <path fill="none" class="domain" stroke="#000" d="M-6,$(histHeight-histBottomPadding)H0.5V0.5H-6"></path>
+                    $GetHistogramStats($For( "i", 1, 1, histYLabelsCount+1,
+                    <g class="tick" opacity="1" transform="translate(0,$((i-1)*(histDataHeight/histYLabelsCount)+1))">
+                        <line stroke="#000" x2="-6"></line>
+                        <line stroke="#999" x2="$(histWidth-histLeftPadding)"></line>
+                        <text class="histText" x="-9" dy="0.32em">$( (histMaxCount/histYLabelsCount)*(histYLabelsCount+1-i):d )</text>
+                    </g>
+                    ))
+                </g>
+            </g>
+            <g id="axis-x" transform="translate(0,1)">
+                <text x="50%" y="$(histHeight-10)" dominant-baseline="middle" text-anchor="middle">Deviation from prior position [$(unitsShort)]</text>
+                <g transform="translate($(histLeftPadding-1),$(histHeight-histBottomPadding))" font-size="10" font-family="sans-serif" text-anchor="middle">
+                    <path class="domain" fill="none" stroke="#000" d="M0.5,6V0.5H$(histWidth-histLeftPadding+1)"></path>
+                    $IterateHistogramBins(
+                    <g class="tick" opacity="1" transform="translate($(histIndex*histColumnWidth),0)">
+                        $If(histIndex%5>0,
+                        <line stroke="#888" y2="6"></line>)
+                        $If(histIndex%5==0,
+                        <line stroke="#000" y2="6"></line>
+                        <text class="histText" y="9" dy="0.71em">$(histValue/coordSystemUnit2Meter:.3f)</text>)
+                    </g>
+                    )
+                </g>
+            </g>
+            <g id="data" transform="translate($(histLeftPadding),$(histTopPadding))">
+                $IterateHistogramBins(
+                <g>
+                    <rect id="binRect-$(histIndex)" style="$Map(Abs(histValue)," fill: url(#Gradient)",lvl1*inpHistAcc,"fill: url(#GradientLvl1)",lvl2*inpHistAcc,"fill: url(#GradientLvl2)",lvl3*inpHistAcc,"fill: url(#GradientLvl3)")" x="$(histIndex*histColumnWidth)" y="$(histDataHeight-histDataHeight*histCount/histMaxCount+1)" width="$(histColumnWidth)" height="$(histDataHeight*histCount/histMaxCount)"></rect>
+                    $If(histCount>0,
+                    <text class="histBinText" text-anchor="middle" x="$((histIndex+0.5)*histColumnWidth)" y="$(histDataHeight-histDataHeight*histCount/histMaxCount-6)" dy="0.32em">$(histCount:d)</text>)
+                </g>
+                )
+            </g>
+        </svg>
+    </div>
+    ))
+
+    <p>
+        $Localize("CAR_GEOLOCATION", "Geo-location of cameras and ground and test control points with color coded accuracy.")
+    </p>
+    <div class="map">
+        <style>
+            .lvl0Shape {
+                fill: $(lvl0Color);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .NoPriorShape {
+                fill: $(noPriorShapeColor);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .UnalignedShape {
+                fill: $(unalignedShapeColor);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .lvl1Shape {
+                fill: $(lvl1Color);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .lvl2Shape {
+                fill: $(lvl2Color);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .lvl3Shape {
+                fill: $(lvl3Color);
+                stroke-width: 1px;
+                stroke: #aaa;
+            }
+
+            .gcpUsed {
+                stroke: #000;
+            }
+
+            .gcpTest {
+                stroke: #000;
+                stroke-width: 1px;
+            }
+
+            .gcpText {
+                font-size: 10px;
+            }
+        </style>
+
+        $If(useExportedMap, <img src="$(attachmentPath)$(mapImageFile)" width="$(mapWidth)" height="$(mapHeight)" />
+        )<svg id="svgCams" width="$(mapWidth)" height="$(mapHeight)">
+            $If(!useExportedMap,
+            <rect x="0" y="0" width="$(mapWidth)" height="$(mapHeight)" fill="#EFE"></rect>
+            )
+            <g font-size="8" font-family="sans-serif" text-anchor="start">
+                $EchoOff(
+
+                // render registered cameras
+                $Declare( "cameraClass", 0 );
+                $Declare( "_X", 0 )
+                $Declare( "_Y", 0 )
+
+                // render unregistered cameras
+                $IterateImages(
+                $If(!inputIsAligned,
+                $ExportImagePriors(inputIndex,
+                $If(inputIsPositionPrior,
+
+                $Echo(
+                $If(isCoordSystemLatLon,
+                <circle class="UnalignedShape" cx="$(mapOfsX+ToPseudoMercatorLon(inputLonOutCS)*mapScale)" cy="$(mapOfsY+ToPseudoMercatorLat(inputLatOutCS)*mapScale)" r="4.5" />
+                )
+                $If(!isCoordSystemLatLon,
+                <circle class="UnalignedShape" cx="$(mapOfsX+inputXOutCS*mapScale)" cy="$(mapHeight-mapOfsY-inputYOutCS*mapScale)" r="4.5" />
+                )
+                )
+                )
+                )
+                )
+                )
+
+                $ExportCameras(
+                $ExportImagePriors(originalImageIndex,
+
+                $Set( "_X", mapOfsX + x*mapScale )
+                $Set( "_Y", mapHeight - mapOfsY - y*mapScale )
+                $If(isCoordSystemLatLon,
+                $Set( "_Y", mapOfsY + ToPseudoMercatorLat(lat)*mapScale )
+                $Set( "_X", mapOfsX + ToPseudoMercatorLon(lon)*mapScale )
+                )
+
+                $If(inputIsPositionPrior,
+                $Set( "cameraClass", "lvl0Shape" );
+                $If( (Abs(priorErrorX)>lvl1*inputAccuracyX) || (Abs(priorErrorY)>lvl1*inputAccuracyY) || (Abs(priorErrorZ)>lvl1*inputAccuracyZ), $Set( "cameraClass", "lvl1Shape" ) );
+                $If( (Abs(priorErrorX)>lvl2*inputAccuracyX) || (Abs(priorErrorY)>lvl2*inputAccuracyY) || (Abs(priorErrorZ)>lvl2*inputAccuracyZ), $Set( "cameraClass", "lvl2Shape" ) );
+                $If( (Abs(priorErrorX)>lvl3*inputAccuracyX) || (Abs(priorErrorY)>lvl3*inputAccuracyY) || (Abs(priorErrorZ)>lvl3*inputAccuracyZ), $Set( "cameraClass", "lvl3Shape" ) );
+
+                $Echo(
+                <circle class="$(cameraClass)" cx="$(_X)" cy="$(_Y)" r="4.5" />)
+
+                $If( (componentCameraCount < 300) || (cameraClass != "lvl0Shape"),
+
+                $Echo(
+                <text x="$(_X+7)" y="$(_Y+5)">$(index)</text>)
+                )
+
+                )
+                $If(!inputIsPositionPrior,
+
+                $Echo(
+                <circle class="NoPriorShape" cx="$(_X)" cy="$(_Y)" r="4.5" />
+                )
+                )
+                )
+                )
+
+                // render ground control points
+                $Declare( "gcpClass", 0 );
+
+                $ExportControlPoints(
+                $If( isGroundControl && isAligned,
+
+                $Set( "gcpClass", "lvl0Shape" );
+
+                $ControlPointError(index,
+                $If( (Abs(cpErrorX)>lvl1*inAccuracyX) || (Abs(cpErrorY)>lvl1*inAccuracyY) || (Abs(cpErrorZ)>lvl1*inAccuracyZ), $Set( "gcpClass", "lvl1Shape" ) );
+                $If( (Abs(cpErrorX)>lvl2*inAccuracyX) || (Abs(cpErrorY)>lvl2*inAccuracyY) || (Abs(cpErrorZ)>lvl2*inAccuracyZ), $Set( "gcpClass", "lvl2Shape" ) );
+                $If( (Abs(cpErrorX)>lvl3*inAccuracyX) || (Abs(cpErrorY)>lvl3*inAccuracyY) || (Abs(cpErrorZ)>lvl3*inAccuracyZ), $Set( "gcpClass", "lvl3Shape" ) );
+                )
+
+                $Set( "_X", mapOfsX + x*mapScale )
+                $Set( "_Y", mapHeight - mapOfsY - y*mapScale )
+                $If(isCoordSystemLatLon,
+                $Set( "_Y", mapOfsY + ToPseudoMercatorLat(lat)*mapScale )
+                $Set( "_X", mapOfsX + ToPseudoMercatorLon(lon)*mapScale )
+                )
+
+                $If( isGroundTest,
+
+                $Echo(
+                <polygon class="$(gcpClass) gcpTest" points="$(_X),$(_Y),$(_X-7),$(_Y-5),$(_X-7),$(_Y+5)" />
+                <text class="gcpText" x="$(_X+7)" y="$(_Y+7)">$(name)</text>
+                )
+                )
+
+                $If( isGroundTest==0,
+
+                $Echo(
+                <circle class="$(gcpClass) gcpUsed" cx="$(_X)" cy="$(_Y)" r="4.5" />
+                <circle class="$(gcpClass) gcpUsed" cx="$(_X)" cy="$(_Y)" r="2.5" />
+                <text class="gcpText" x="$(_X+7)" y="$(_Y+7)">$(name)</text>
+                )
+                )
+                )
+                )
+                )
+            </g>
+        </svg>
+    </div>
+    <figcaption>
+        $If(georefImageCount>0,$Localize("CAR_GREY_DOTS", "Gray dots represent un-registered images with known prior positions."))
+        $If(notgeorefCameraCount>0,$Localize("CAR_CYAN_DOTS", "Cyan dots represent registered images with unknown prior positions."))
+        $Localize("CAR_ACCURACY_CODE", "Accuracy is color coded as described in <a href='#errorCoding'>legend</a> below.")
+    </figcaption>
+    <br />
+
+    $EchoOff(
+
+    $Declare( "errCount", Sum( $ExportCameras( $ExportImagePriors(originalImageIndex, $( inputIsPositionPrior && ( (Abs(priorErrorX)>lvl1*inputAccuracyX) || (Abs(priorErrorY)>lvl1*inputAccuracyY) || (Abs(priorErrorZ)>lvl1*inputAccuracyZ) ) ), ) ) 0 ) )
+
+    )
+    $If( (georefCameraCount > 0) && (errCount == 0),<p>$Localize("CAR_CAMS_WITHIN", "All cameras are positioned within the defined prior position accuracy.")</p>)
+    $If( (georefCameraCount == 0) && (errCount == 0),<p>$Localize("CAR_MISSING_POSE_INFO", "Missing prior camera pose information in order to be able to evaluate the registration accuracy.")</p>)
+    $If( errCount > 0,
+    <h2 style="text-align:left">$Localize("CAR_CAM_INFO", "Camera Information")</h2>
+    <p>
+        $Localize("CAR_DETAIL_INFO", "Detailed information only for cameras with the geo-location outside of the defined prior accuracy region.")
+    </p>
+    <style>
+        .nameCell {
+            max-width: 150px;
+            overflow: hidden;
+        }
+
+        .nameCellInner {
+            float: right;
+        }
+    </style>
+    <table class="listTable" width="100%">
+        <tr align="center">
+            <td>Index</td>
+            <td>Name</td>
+            $If(isCoordSystemLatLon,
+            <td>Latitude [&#176;]</td>
+            <td>Longitude [&#176;]</td>
+            <td>Altitude [$(unitsShort)]</td>
+            <td>Cal. Latitude [&#176;]</td>
+            <td>Cal. Longitude [&#176;]</td>
+            <td>Cal. Altitude [$(unitsShort)]</td>)
+            $If(!isCoordSystemLatLon,
+            <td>X [$(unitsShort)]</td>
+            <td>Y [$(unitsShort)]</td>
+            <td>Z [$(unitsShort)]</td>
+            <td>Cal. X [$(unitsShort)]</td>
+            <td>Cal. Y [$(unitsShort)]</td>
+            <td>Cal. Z [$(unitsShort)]</td>)
+            <td>dX [$(unitsShort)]</td>
+            <td>dY [$(unitsShort)]</td>
+            <td>dZ [$(unitsShort)]</td>
+        </tr>
+        $ExportCameras($ExportImagePriors(originalImageIndex,$If( inputIsPositionPrior && ((Abs(priorErrorX)>lvl1*inputAccuracyX) || (Abs(priorErrorY)>lvl1*inputAccuracyY) || (Abs(priorErrorZ)>lvl1*inputAccuracyZ)),
+        <tr>
+            <td>$(index)</td>
+            <td class="nameCell"><span class="nameCellInner">$(imageName)$(imageExt)</span></td>
+            $If(!isCoordSystemLatLon,
+            <td>$(inputXOutCS:.3f) <sub>+/-$(inputAccuracyX*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(inputYOutCS:.3f) <sub>+/-$(inputAccuracyY*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(inputZOutCS:.3f) <sub>+/-$(inputAccuracyZ*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(x:.3f)</td>
+            <td>$(y:.3f)</td>
+            <td>$(z:.3f)</td>)
+            $If(isCoordSystemLatLon,
+            <td>$(inputLatOutCS:.8f) <sub>+/-$(inputAccuracyY*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(inputLonOutCS:.8f) <sub>+/-$(inputAccuracyX*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(inputAltOutCS:.3f) <sub>+/-$(inputAccuracyZ*inputCSUnitToMeter/coordSystemUnit2Meter:.3f)</sub></td>
+            <td>$(lat:.8f)</td>
+            <td>$(lon:.8f)</td>
+            <td>$(alt:.3f)</td>)
+
+            <td bgcolor="$Map(Abs(priorErrorX),"",lvl1*inputAccuracyX,"$(lvl1Color)",lvl2*inputAccuracyY,"$(lvl2Color)",lvl3*inputAccuracyZ,"$(lvl3Color)")">$(priorErrorX:.3f)</td>
+            <td bgcolor="$Map(Abs(priorErrorY),"",lvl1*inputAccuracyX,"$(lvl1Color)",lvl2*inputAccuracyY,"$(lvl2Color)",lvl3*inputAccuracyZ,"$(lvl3Color)")">$(priorErrorY:.3f)</td>
+            <td bgcolor="$Map(Abs(priorErrorZ),"",lvl1*inputAccuracyX,"$(lvl1Color)",lvl2*inputAccuracyY,"$(lvl2Color)",lvl3*inputAccuracyZ,"$(lvl3Color)")">$(priorErrorZ:.3f)</td>
+        </tr>
+        )))
+    </table>
+    <figcaption>
+        $Localize("CAR_ACCURACY_CODE", "Accuracy is color coded as described in &lt;a href='#errorCoding'&gt;legend&lt;/a&gt; below.")
+    </figcaption>)
+
+    <div id="errorCoding" style="border:solid 1px silver;padding:10px 20px 10px 20px;font-size:0.8em">
+        <p>$Localize("CAR_GEOLOC_CODE", "Accuracy of geo-location of cameras and ground and test control points is color coded as follows:")</p>
+        <ul style="padding-left:20px">
+            <li><span style="color:$(lvl0Color)">$Localize("CAR_GREEN_NONE","green/none")</span> $Localize("CAR_TOTDEV_SMALLER","if the total deviation is smaller than the expected prior accuracy,")</li>
+            <li><span style="color:$(lvl1Color)">$Localize("CAR_YELLOW","yellow")</span> $Localize("CAR_TOTDEV_1_GREATER","if the total deviation is $(lvl1:.1f) times greater than the prior accuracy,")</li>
+            <li><span style="color:$(lvl2Color)">$Localize("CAR_ORANGE","orange")</span> $Localize("CAR_TOTDEV_2_GREATER","if the total deviation is $(lvl2:.1f) times greater than the prior accuracy,")</li>
+            <li><span style="color:$(lvl3Color)">$Localize("CAR_RED","red")</span> $Localize("CAR_TOTDEV_3_GREATER","if the total deviation is $(lvl3:.1f) times greater than the prior accuracy.")</li>
+        </ul>
+    </div>
+
+    )
+    $If(gcpCount+georefCameraCount+georefImageCount==0,
+    <p>$Localize("CAR_NO_GEO_INPUT", "The scene does not contain any geo-referenced input.")</p>
+    )
+
+    $EchoOff(
+
+    $Declare( "_X", 0 )
+    $Declare( "_Y", 0 )
+
+    $Declare( "ellipseScale", maxEllipsePxRadius / maxEllipseUnitRadius )
+
+    // Approximate map unit scale when lat lon
+    $Declare( "mapScaleUnit", mapScale )
+    $If(isCoordSystemLatLon,
+    $Declare( "mapMaxXUnit", Max( $ExportCameras( $(euclidx), ) -1e+10 ) / coordSystemUnit2Meter )
+    $Declare( "mapMinXUnit", Min( $ExportCameras( $(euclidx), ) 1e+10 )  / coordSystemUnit2Meter )
+    $Declare( "mapMaxYUnit", Max( $ExportCameras( $(euclidy), ) -1e+10 ) / coordSystemUnit2Meter )
+    $Declare( "mapMinYUnit", Min( $ExportCameras( $(euclidy), ) 1e+10 )  / coordSystemUnit2Meter )
+    $Set( "mapScaleUnit", (mapWidth-2*mapPadding)/(mapMaxXUnit-mapMinXUnit) )
+    $Declare( "mapScaleYUnit", (mapHeight-2*mapPadding)/(mapMaxYUnit-mapMinYUnit) )
+    $If( mapScaleUnit > mapScaleYUnit, $Set( "mapScaleUnit", mapScaleYUnit ) )
+    )
+
+    // Round down ellipse magnification to 1..9 * 10^x
+    $Declare( "ellipseMagnitude", ellipseScale / mapScaleUnit )
+    $Declare( "ellipseMagnitudeBase", Pow( 10, Floor( Log10(ellipseMagnitude) ) ) )
+    $Declare( "mostSignificantDigit", ellipseMagnitude / ellipseMagnitudeBase )
+    $Set( "ellipseMagnitude", Floor( mostSignificantDigit ) * ellipseMagnitudeBase )
+
+    // Update ellipseScale
+    $Set( "ellipseScale", ellipseMagnitude * mapScaleUnit )
+
+    $Declare( "posUncertMaxZ", Sqrt( Max( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovZZ), )) 0 ) ))
+    $Declare( "posUncertMinZ", Sqrt( Min( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovZZ), )) 10000000000 ) ))
+
+    )
+    <h2 style="text-align:left">$Localize("CAR_CAM_UNCERT_MAP_TITLE", "Relative Camera Position Uncertainty")</h2>
+    <div class="map">
+        <style>
+            svg ellipse {
+                transform-box: fill-box;
+                transform-origin: center;
+            }
+
+            .camPos {
+                fill: hsl(210, 100%, 50%);
+                stroke-width: 0px;
+            }
+
+            .camPosUncert {
+                fill: none;
+                fill-opacity: 75%;
+                stroke-width: 1px;
+                stroke: hsl(210, 100%, 30%);
+            }
+
+            .camPosUncertOrig {
+                fill: none;
+                stroke-width: 1px;
+                stroke: #00f;
+            }
+
+            .uncertScale {
+                stroke: #000;
+                stroke-width: 1px;
+            }
+        </style>
+        $If(useExportedMap, <img src="$(attachmentPath)$(mapImageFile)" width="$(mapWidth)" height="$(mapHeight)" />
+        )<svg id="svgRelCams" width="$(mapWidth)" height="$(mapHeight)">
+            $If(!useExportedMap,
+            <rect x="0" y="0" width="$(mapWidth)" height="$(mapHeight)" fill="#EFE"></rect>
+            )
+            <g>
+                $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $EchoOff(
+
+                // Ellipses
+
+                $Set( "_X", mapOfsX + x*mapScale )
+                $Set( "_Y", mapHeight - mapOfsY - y*mapScale )
+                $If(isCoordSystemLatLon,
+                $Set( "_Y", mapOfsY + ToPseudoMercatorLat(lat)*mapScale )
+                $Set( "_X", mapOfsX + ToPseudoMercatorLon(lon)*mapScale )
+                )
+                )$CovToEllipse2D( posUncertCovXX, posUncertCovXY, posUncertCovYY,
+                <ellipse class="camPosUncert" style="fill: hsl(0, 0%, $(100-100*(Sqrt(posUncertCovZZ)-posUncertMinZ)/(posUncertMaxZ-posUncertMinZ):.0f)%)" rx="$(ellipseRadiusMax*ellipseScale)" ry="$(ellipseRadiusMin*ellipseScale)" transform="translate($(_X), $(_Y)) rotate($(-ellipseRot))"></ellipse>)
+                <circle class="camPos" cx="$(_X)" cy="$(_Y)" r="$(camPosRadius)"></circle>
+                ))
+            </g>
+            <g id="legend" font-size="8" font-family="sans-serif" text-anchor="start">
+                $EchoOff(
+
+                // Legend swatches
+
+                $Declare( "legendTitleSize", 9 )
+                $Declare( "legendTitleTopBotAlign", 12 + legendTitleSize )
+                $Declare( "swatchWidth", 30 )
+                $Declare( "swatchHeight", 10 )
+                $Declare( "swatchLabelWidth", 45 )
+                $Declare( "swatchLabelOffset", 5)
+                $Declare( "paddingWidth", ( mapLegendWidth - (swatchWidth + swatchLabelWidth + swatchLabelOffset) ) / 2 )
+                $Declare( "swatchPosStepY", swatchHeight + 4 )
+                $Declare( "swatchesLeft", mapWidth - mapLegendWidth + paddingWidth )
+                $Declare( "swatchesTop", legendTitleTopBotAlign + 6 )
+                $Declare( "swatchLabelsLeft", swatchesLeft + swatchWidth + swatchLabelOffset )
+                $Declare( "swatchLabelsTopBotAlign", swatchesTop + swatchHeight - 1 )
+
+                // Legend scale
+
+                $Declare( "uncertScaleTop", swatchLabelsTopBotAlign+10*swatchPosStepY + 12 )
+                $Declare( "uncertScaleGuideMid", uncertScaleTop + legendTitleSize + 12 )
+                // compute uncertainty scale legend size
+                $Declare( "uncertScaleSizeUnits", ( ( mapWidth - paddingWidth ) - (mapWidth - mapLegendWidth + paddingWidth) ) / ellipseScale )
+                $Declare( "uncertScaleSizeUnitsBase", Pow( 10, Floor( Log10(uncertScaleSizeUnits) ) ) )
+                $Declare( "firstDigit", Floor( uncertScaleSizeUnits / uncertScaleSizeUnitsBase ) )
+                $If( firstDigit < 5,
+                $If( firstDigit < 2, $Set( "uncertScaleSizeUnits", 1 * uncertScaleSizeUnitsBase ) )
+                $If( firstDigit >= 2, $Set( "uncertScaleSizeUnits", 2 * uncertScaleSizeUnitsBase ) )
+                )
+                $If( firstDigit >= 5, $Set( "uncertScaleSizeUnits", 5 * uncertScaleSizeUnitsBase ) )
+                // left align
+                $Declare( "uncertScaleLeft", mapWidth - mapLegendWidth + paddingWidth )
+                $Declare( "uncertScaleRight", uncertScaleLeft + uncertScaleSizeUnits * ellipseScale )
+
+                )$If(useExportedMap,
+                <rect id="legend-background" x="0" y="0" width="0" height="0" style="fill: hsl(0, 0%, 100%)" opacity="70%"></rect>
+                )
+                <text x="$(mapWidth - paddingWidth)" y="$(legendTitleTopBotAlign)" text-anchor="end" font-size="$(legendTitleSize)">$Localize("CAR_CAM_UNCERT_MAP_LEGEND_SWATCHES", "Uncertainty in Z direction")</text>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 100%);" x="$(swatchesLeft)" y="$(swatchesTop)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 90%);" x="$(swatchesLeft)" y="$(swatchesTop+ 1*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 80%);" x="$(swatchesLeft)" y="$(swatchesTop+ 2*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 70%);" x="$(swatchesLeft)" y="$(swatchesTop+ 3*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 60%);" x="$(swatchesLeft)" y="$(swatchesTop+ 4*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 50%);" x="$(swatchesLeft)" y="$(swatchesTop+ 5*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 40%);" x="$(swatchesLeft)" y="$(swatchesTop+ 6*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 30%);" x="$(swatchesLeft)" y="$(swatchesTop+ 7*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 20%);" x="$(swatchesLeft)" y="$(swatchesTop+ 8*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%, 10%);" x="$(swatchesLeft)" y="$(swatchesTop+ 9*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <rect class="camPosUncert" style="fill: hsl(0, 0%,  0%);" x="$(swatchesLeft)" y="$(swatchesTop+10*swatchPosStepY)" width="$(swatchWidth)" height="$(swatchHeight)"></rect>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign)">$(posUncertMinZ:.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 1*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(1/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 2*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(2/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 3*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(3/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 4*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(4/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 5*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(5/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 6*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(6/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 7*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(7/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 8*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(8/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+ 9*swatchPosStepY)">$(posUncertMinZ+(posUncertMaxZ-posUncertMinZ)*(9/10):.2e) $(unitsShort)</text>
+                <text x="$(swatchLabelsLeft)" y="$(swatchLabelsTopBotAlign+10*swatchPosStepY)">$(posUncertMaxZ:.2e) $(unitsShort)</text>
+                <text x="$(mapWidth - paddingWidth)" y="$(uncertScaleTop + legendTitleSize)" text-anchor="end" font-size="$(legendTitleSize)">$Localize("CAR_CAM_UNCERT_MAP_LEGEND_SCALE", "Uncertainty ellipses scale")</text>
+                <line class="uncertScale" x1="$(uncertScaleLeft)" y1="$(uncertScaleGuideMid)" x2="$(uncertScaleRight)" y2="$(uncertScaleGuideMid)"></line>
+                <line class="uncertScale" x1="$(uncertScaleLeft)" y1="$(uncertScaleGuideMid-2)" x2="$(uncertScaleLeft)" y2="$(uncertScaleGuideMid+2)"></line>
+                <line class="uncertScale" x1="$(uncertScaleRight)" y1="$(uncertScaleGuideMid-2)" x2="$(uncertScaleRight)" y2="$(uncertScaleGuideMid+2)"></line>
+                <text x="$( ( uncertScaleRight + uncertScaleLeft ) / 2 )" y="$(uncertScaleGuideMid+12)" text-anchor="middle">$(uncertScaleSizeUnits) $(unitsShort)</text>
+            </g>$If(useExportedMap,
+            <script type="text/javascript">
+                const padding = 4
+                var bbox = document.getElementById("legend").getBBox()
+                var rect = document.getElementById("legend-background")
+                rect.setAttribute("x", bbox.x - padding)
+                rect.setAttribute("y", bbox.y - padding)
+                rect.setAttribute("width", bbox.width + 2 * padding)
+                rect.setAttribute("height", bbox.height + 2 * padding)
+            </script>)
+        </svg>
+    </div>
+    <figcaption>
+        $Localize("CAR_CAM_UNCERT_MAP_CAPTION", "Ellipses represent relative camera position uncertainties. Blue points in the middle of the ellipses represent estimated camera positions. Color of the ellipses correspond to relative camera position in Z direction. The uncertainty ellipses are $(ellipseMagnitude:.0f)x magnified." )
+        $If(isCoordSystemLatLon,
+        $Localize("CAR_CAM_UNCERT_MAP_CAPTION_DISTORTION", "Distortion caused by pseudo-mercator projection is not compensated."))
+    </figcaption>
+    <br />
+
+    <p>$Localize("CAR_CAM_UCERT_STATS", "Statistics of relative camera position uncertainty in X,Y,Z direction.")</p>
+    <table class="listTable" width="100%">
+        $EchoOff(
+        // Qxx = sigmaX * sigmaX
+        $Declare( "posUncertMeanX", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(Sqrt(posUncertCovXX)), )) 0 ))
+        $Set( "posUncertMeanX", posUncertMeanX / componentCameraCount )
+        $Declare( "posUncertStdevX", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $((Sqrt(posUncertCovXX) - posUncertMeanX)*(Sqrt(posUncertCovXX) - posUncertMeanX)), )) 0 ))
+        $Set( "posUncertStdevX", Sqrt( posUncertStdevX / ( componentCameraCount - 1 ) ) )
+
+        $Declare( "posUncertMeanY", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(Sqrt(posUncertCovYY)), )) 0 ))
+        $Set( "posUncertMeanY", posUncertMeanY / componentCameraCount )
+        $Declare( "posUncertStdevY", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $((Sqrt(posUncertCovYY) - posUncertMeanY)*(Sqrt(posUncertCovYY) - posUncertMeanY)), )) 0 ))
+        $Set( "posUncertStdevY", Sqrt( posUncertStdevY / ( componentCameraCount - 1 ) ) )
+
+        $Declare( "posUncertMeanZ", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(Sqrt(posUncertCovZZ)), )) 0 ))
+        $Set( "posUncertMeanZ", posUncertMeanZ / componentCameraCount )
+        $Declare( "posUncertStdevZ", Sum( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $((Sqrt(posUncertCovZZ) - posUncertMeanZ)*(Sqrt(posUncertCovZZ) - posUncertMeanZ)), )) 0 ))
+        $Set( "posUncertStdevZ", Sqrt( posUncertStdevZ / ( componentCameraCount - 1 ) ) )
+
+        $Declare( "posUncertMaxX", Sqrt(Max( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovXX), )) 0 )))
+        $Declare( "posUncertMaxY", Sqrt(Max( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovYY), )) 0 )))
+        $Declare( "posUncertMinX", Sqrt(Min( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovXX), )) 10000000000 )))
+        $Declare( "posUncertMinY", Sqrt(Min( $ExportCameras( $ExportRelativeCameraPositionUncertainty( cameraIndex, $(posUncertCovYY), )) 10000000000 )))
+
+        )
+        <tr align="center">
+            <td></td>
+            <td>X[$(unitsShort)]</td>
+            <td>Y[$(unitsShort)]</td>
+            <td>Z[$(unitsShort)]</td>
+        </tr>
+        <tr>
+            <td>
+                $Localize("CAR_MEAN", "Mean")
+            </td>
+            <td>$(posUncertMeanX:.3f)</td>
+            <td>$(posUncertMeanY:.3f)</td>
+            <td>$(posUncertMeanZ:.3f)</td>
+        </tr>
+        <tr>
+            <td>
+                $Localize("CAR_STANDARD_DEVIATION_ABBR", "Std")
+            </td>
+            <td>$(posUncertStdevX:.3f)</td>
+            <td>$(posUncertStdevY:.3f)</td>
+            <td>$(posUncertStdevZ:.3f)</td>
+        </tr>
+        <tr>
+            <td>
+                $Localize("CAR_MAX", "Max")
+            </td>
+            <td>$(posUncertMaxX:.3f)</td>
+            <td>$(posUncertMaxY:.3f)</td>
+            <td>$(posUncertMaxZ:.3f)</td>
+        </tr>
+        <tr>
+            <td>
+                $Localize("CAR_MIN", "Min")
+            </td>
+            <td>$(posUncertMinX:.3f)</td>
+            <td>$(posUncertMinY:.3f)</td>
+            <td>$(posUncertMinZ:.3f)</td>
+        </tr>
+    </table>
+    <br />
+
+    ))<!-- end of ComponentInfo -->
+
+</body>
+</html>
