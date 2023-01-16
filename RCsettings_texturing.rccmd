@@ -27,5 +27,10 @@
 -set "simplEqualizeDensity=true"
 -set "mvsFltBorderDecimationStyle=1"
 -set "simplPreserveParts=2"
+-set "reprojectionTool_supersampling=-1"
+-set "reprojectionTool_enableDisplacement=false"
+-set "reprojectionTool_allowColor=false"
+-set "reprojectionTool_normal=0"
+-set "reprojectionTool_useCustomDistance=0"
 -save
 -quit

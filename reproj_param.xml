@@ -1,0 +1,13 @@
+<Configuration id="{8F3517E3-5632-40FE-BD10-9967EA8F299F}">
+  <entry key="reprojectionTool_supersampling" value="-1"/>
+  <entry key="reprojectionTool_resultModel">
+    <value>{C16CE075-AC99-4BC7-AF6D-40C3088422A7}PG_boat91_test_10M</value>
+  </entry>
+  <entry key="reprojectionTool_sourceModel">
+    <value>{91319A8B-241F-4531-9620-C807C546E41D}PG_boat91_test_highpoly_smoothed</value>
+  </entry>
+  <entry key="reprojectionTool_enableDisplacement" value="false"/>
+  <entry key="reprojectionTool_allowColor" value="false"/>
+  <entry key="reprojectionTool_normal" value="0"/>
+  <entry key="reprojectionTool_useCustomDistance" value="0"/>
+</Configuration>
