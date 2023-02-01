@@ -7,6 +7,7 @@ import json
 import itertools
 import pandas as pd
 import pathconfig
+from datetime import datetime 
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
@@ -26,7 +27,8 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
         if scan_id.is_dir() and not scan_id in config['excludescanids']:
             scan = {}
             scan['id']= scan_id.stem
-            scan['processingstate'] = []
+            scan['processingstate'] = pd.DataFrame({'command': 'provide_scandf', 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': True}, index=['datetime'])
+            #pd.concat([scan['processingstate'], 
             scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
             scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
@@ -111,6 +113,36 @@ def missingInMaster(all, master):
     merged['exists'] = np.where(merged.exists == 'both', True, False)
     return merged
 
+def writeProcessingstateFile(scan):
+    ProcessingstateFile = 'Processingstate' + '_' + scan['id'] +'.json'
+    ProcessingstateFilepath = scan['RCoutputfolder'] / ProcessingstateFile
+    if ProcessingstateFilepath.is_file():
+        ProcessingstateFilepath.unlink()
+    scan['processingstate'].to_json(ProcessingstateFilepath , orient="records")
+
+def readProcessingstateFile(scan):
+    ProcessingstateFile = 'Processingstate' + '_' + scan['id'] +'.json'
+    ProcessingstateFilepath = scan['RCoutputfolder'] / ProcessingstateFile
+    if ProcessingstateFilepath.is_file():
+        scan['processingstate'] = pd.read_json(ProcessingstateFilepath, orient='records')
+    return scan
+
+def checkProcessingstate(scan, command):
+    if len(scan['processingstate'][scan['processingstate']['command']== command ]) == 1:
+        return True
+    else:
+        return False
+
+def resumeProcessing_collective(scandf):
+    previousscandf_path = Path(config['workspace']) / 'rcprocessingdf.pkl'
+    if previousscandf_path.is_file() and config['resume_processing']:
+        previousscandf = pd.read_pickle(str(Path(config['workspace']) / 'rcprocessingdf.pkl'))
+        previousscandf = previousscandf.set_index('id',drop=False)
+        scandf = scandf.set_index('id',drop=False)
+        print(previousscandf.columns)
+        scandf  = pd.concat([scandf , previousscandf[previousscandf.columns.difference(scandf.columns)]], join='outer', axis=1)
+        scandf.update(previousscandf)
+    return scandf
 
 def makeRCCMDfromListfield(scan, commandlistfield, rccmdpathfield='rccmdpath'):
     rccmdname = commandlistfield + '_' + scan['id'] +'.rccmd'
@@ -132,22 +164,23 @@ def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'd
             subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
             + ' -headless' + ' -setInstanceName ' + instanceName + ' -load ' \
             + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
-            scan['processingstate'].append(rccmdpathfield)
+            scan['processingstate']=pd.concat([scan['processingstate'], pd.DataFrame({'command': rccmdpathfield, 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': True}, index=['datetime'])])
             return scan
         except subprocess.CalledProcessError as e:
             print(e.output)
-            scan['processingstate'].append(rccmdpathfield + ' failed')
+            scan['processingstate']=pd.concat([scan['processingstate'], pd.DataFrame({'command': rccmdpathfield, 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': False}, index=['datetime'])])
+
             return scan
     if not headless:
         try:
             subprocess.check_output('"' + str(Path(config['RCpath']).as_posix()) + '"' \
             + ' -setInstanceName ' + instanceName + ' -load ' \
             + str(scan['rcproj_path']) + ' -execRCCMD ' + '"' + str(scan[rccmdpathfield]) + '"' )
-            scan['processingstate'].append(rccmdpathfield)
+            scan['processingstate']=pd.concat([scan['processingstate'], pd.DataFrame({'command': rccmdpathfield, 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': True}, index=['datetime'])])
             return scan
         except subprocess.CalledProcessError as e:
             print(e.output)
-            scan['processingstate'].append(rccmdpathfield + ' failed')
+            scan['processingstate']=pd.concat([scan['processingstate'], pd.DataFrame({'command': rccmdpathfield, 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': False}, index=['datetime'])])
             return scan        
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
