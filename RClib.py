@@ -19,7 +19,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('.\config.json')
+config = loadconfigs('.\config_sedimentcores.json')
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
@@ -31,6 +31,8 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             #pd.concat([scan['processingstate'], 
             scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
             scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
+            if 'constantpp3file' in config.keys() and Path(config['constantpp3file']).is_file():
+                scan['pp3file'] = [config['constantpp3file']]
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
@@ -40,6 +42,10 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan['imagedf'] = pd.DataFrame(imagelist)
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)
+
+def baseimageIsDevimage(series):
+    series['dev-img_path']=series['rawimg_path']
+    return series
 
 def defineRawTherapeeOutput(series, foldername=''):
     series['RToutputfolder'] = Path(config['workspace']) / series['id'] / foldername
