@@ -8,6 +8,10 @@ import itertools
 import pandas as pd
 import pathconfig
 from datetime import datetime 
+import geopandas as gpd
+from shapely.geometry import box, Polygon
+from shapely.affinity import rotate
+import xml.etree.ElementTree as ET
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
@@ -34,6 +38,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             if 'constantpp3file' in config.keys() and Path(config['constantpp3file']).is_file():
                 scan['pp3file'] = [config['constantpp3file']]
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
+            scan['orthoboxfile'] = [file for file in scan['scan_dir'].rglob("*.rcortho")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
                 image_dict = {}
@@ -220,6 +225,59 @@ def getLengthWidth(box):
     xdist = xmax - xmin
     ydist = ymax - ymin
     return xdist, ydist
+
+def read_rcorthobox(series, rcorthofield='orthoboxfile', outfield='orthobox'):
+    boxlist = []
+    print(series[rcorthofield])
+    for item in series[rcorthofield]:
+        if item.is_file:
+            print(item)
+            with open(item, 'r') as f:
+                contents = f.read()
+            xmls = contents.split('</OrthoProjection>')
+            ortho_xml = xmls[0] + '</OrthoProjection>'
+            recon_xml = xmls[1].lstrip('<')
+            print(recon_xml)
+            # Read the reconstruction region box coordinates from the second xml
+            reconstruction_region = ET.fromstring(recon_xml)
+            try:   
+                center_elem = reconstruction_region.find('CentreEuclid').attrib['centre']
+            except:
+                center_elem = reconstruction_region.find('CentreEuclid').find('centre').text
+            print(center_elem )
+            center_point = tuple(map(float, center_elem.split()))
+            try:
+                width, height, depth = tuple(map(float, reconstruction_region.attrib['widthHeightDepth'].split()))
+            except:
+                width, height, depth = tuple(map(float, reconstruction_region.find('widthHeightDepth').text.split()))
+            print(width, height, depth )
+            # Create the 3D box geometry as a Shapely Polygon
+            box_2d = box(-width/2, -height/2, width/2, height/2)
+            box_3d = Polygon([(x, y, 0) for x, y in box_2d.exterior.coords] + 
+                            [(x, y, depth) for x, y in box_2d.exterior.coords[::-1]])
+
+            # Rotate the box to match the yawPitchRoll rotation in the XML file
+            try:
+                yaw, pitch, roll = tuple(map(float, reconstruction_region.attrib['yawPitchRoll'].split()))
+            except:
+                yaw, pitch, roll = tuple(map(float, reconstruction_region.find('yawPitchRoll').text.split()))
+            box_3d = rotate(box_3d, roll, origin=center_point, use_radians=False)  # Rotate around the z-axis
+
+            box1 = {}
+            box1['geometry'] = box_3d
+            box1['orthoprojection'] = ortho_xml
+            boxlist.append(box1.copy())
+    # Create a GeoDataFrame with the box geometry
+    series[outfield] = gpd.GeoDataFrame(boxlist, geometry='geometry')
+
+    # Add CRS information if available
+    if len(boxlist) > 0 and 'globalCoordinateSystem' in reconstruction_region.attrib:
+        crs = reconstruction_region.attrib['globalCoordinateSystem']
+        series[outfield].crs = crs
+
+    return series
+
+
 
 def write_rcbox_wide(series, length, width, depth, reprojbuffer, tree, root):
     series['rcboxwideoutpath'] = os.path.join(outputfolder, 'tile3D_' + str(series['GridId']) + '_wide.rcbox')
