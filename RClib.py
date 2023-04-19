@@ -228,43 +228,52 @@ def getLengthWidth(box):
 
 def read_rcorthobox(series, rcorthofield='orthoboxfile', outfield='orthobox'):
     boxlist = []
-    print(series[rcorthofield])
+    #print(series[rcorthofield])
     for item in series[rcorthofield]:
         if item.is_file:
-            print(item)
+            #print(item)
             with open(item, 'r') as f:
                 contents = f.read()
             xmls = contents.split('</OrthoProjection>')
             ortho_xml = xmls[0] + '</OrthoProjection>'
             recon_xml = xmls[1].lstrip('<')
-            print(recon_xml)
+            #print(recon_xml)
             # Read the reconstruction region box coordinates from the second xml
             reconstruction_region = ET.fromstring(recon_xml)
             try:   
-                center_elem = reconstruction_region.find('CentreEuclid').attrib['centre']
+                x,y,z = tuple(map(float,reconstruction_region.find('CentreEuclid').attrib['centre'].split()))
             except:
-                center_elem = reconstruction_region.find('CentreEuclid').find('centre').text
-            print(center_elem )
-            center_point = tuple(map(float, center_elem.split()))
+                x,y,z = tuple(map(float, reconstruction_region.find('CentreEuclid').find('centre').text.split()))
+            #print(center_elem )
+            #center_point = tuple(map(float, center_elem.split()))
             try:
                 width, height, depth = tuple(map(float, reconstruction_region.attrib['widthHeightDepth'].split()))
             except:
                 width, height, depth = tuple(map(float, reconstruction_region.find('widthHeightDepth').text.split()))
-            print(width, height, depth )
+            #print(width, height, depth )
             # Create the 3D box geometry as a Shapely Polygon
-            box_2d = box(-width/2, -height/2, width/2, height/2)
-            box_3d = Polygon([(x, y, 0) for x, y in box_2d.exterior.coords] + 
-                            [(x, y, depth) for x, y in box_2d.exterior.coords[::-1]])
+            half_width = width / 2
+            half_height = height / 2
+            half_depth = depth / 2
+            coordinates = [
+                (x - half_width, y - half_height),
+                (x - half_width, y + half_height),
+                (x + half_width, y + half_height),
+                (x + half_width, y - half_height)
+            ]
+            box1 = Polygon(coordinates)
 
             # Rotate the box to match the yawPitchRoll rotation in the XML file
             try:
                 yaw, pitch, roll = tuple(map(float, reconstruction_region.attrib['yawPitchRoll'].split()))
             except:
                 yaw, pitch, roll = tuple(map(float, reconstruction_region.find('yawPitchRoll').text.split()))
-            box_3d = rotate(box_3d, roll, origin=center_point, use_radians=False)  # Rotate around the z-axis
-
+            print(yaw,pitch,roll)
+            box_3d = rotate(box1, 180 - roll, origin=(x,y))  # Rotate around the z-axis
+            print(box_3d)
             box1 = {}
             box1['geometry'] = box_3d
+            box1['name'] = item.stem
             box1['orthoprojection'] = ortho_xml
             boxlist.append(box1.copy())
     # Create a GeoDataFrame with the box geometry
