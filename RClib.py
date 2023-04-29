@@ -23,7 +23,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('.\config_sedimentcores.json')
+config = loadconfigs('.\config_scanner.json')
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
@@ -41,12 +41,30 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan['orthoboxfile'] = [file for file in scan['scan_dir'].rglob("*.rcortho")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
-                image_dict = {}
-                image_dict['rawimg_path']= Path(file)
-                imagelist.append(image_dict.copy())
+                if not file.stem.endswith('.mask'):
+                    image_dict = {}
+                    image_dict['rawimg_path']= Path(file)
+                    mask = image_dict['rawimg_path'].with_name(image_dict['rawimg_path'].name + '.mask.png')
+
+                    if mask.is_file():
+                        image_dict['maskimg_path'] = mask
+                    imagelist.append(image_dict.copy())
             scan['imagedf'] = pd.DataFrame(imagelist)
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)
+
+def provide_imageinfo_scanner(series):
+    print(series['rawimg_path'].stem)
+    cam, cam2 , objectidfile, roundnumber, imgnumber = series['rawimg_path'].stem.split('_')
+    series['cam_id'] = cam + '_'+ cam2
+    #image_dict['objectid'] = scan_id.split('-')[2]
+    series['roundnumber'] = roundnumber
+    imgnumber = imgnumber.replace('.jpg','')
+    series['imgnumber'] = int(imgnumber.replace('test',''))
+    return series
+
+
+
 
 def baseimageIsDevimage(series):
     series['dev-img_path']=series['rawimg_path']

@@ -28,6 +28,6 @@
     "devimage_format": ".JPG",
     "exportsettings1": "E:/GitHub/RCprocessing/export_param.xml",
     "exportname_prefix": "",
-    "rcortho2gis": true
+    "rcorthobox2gis": true
 }
     

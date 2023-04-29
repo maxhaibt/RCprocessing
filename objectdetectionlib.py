@@ -4,16 +4,21 @@ Created on Wed Sep  2 11:37:59 2020
 
 @author: mhaibt
 """
+import json
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib import colors
+from matplotlib.colors import ListedColormap
 import os
 from pathlib import Path
+import time
 import cv2
 import numpy as np
 import numpy.ma as ma
 from PIL import Image
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.colors import hsv_to_rgb
 import pandas as pd
 from subprocess import check_output
 from sklearn.cluster import KMeans
@@ -28,6 +33,12 @@ import torch
 #from skimage import io
 #import skimage.draw as draw
 #import skimage.color as color
+
+def loadconfigs(configpath):
+    with open(configpath) as configfile:
+        config = json.load(configfile)
+    return config
+config = loadconfigs('.\config_scanner.json')
 
 def loadSAMpredictor():
     sam_checkpoint = "C:/Users/mhaibt/Downloads/sam_vit_h_4b8939.pth"
@@ -431,8 +442,8 @@ def grabcut(img, masker, resizeper):
 
     return valuemask, img
 
-# display the image frameless and get pixel coordinates from mouse click, use this mouse click to get the mask via the predictor, return the mask and display it
-def show_anns_class(anns):
+
+def show_anns_class(anns, outpath):
 
     if len(anns) == 0:
         return
@@ -474,8 +485,8 @@ def show_anns_class(anns):
         x, y = bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2
         
         ax.text(x, y, f'{classs}', fontsize=12, color='black', ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-
-def show_anns(anns):
+    ax.savefig(outpath)
+def show_anns(anns, outpath):
     if len(anns) == 0:
         return
     sorted_anns = sorted(anns, key=(lambda x: x['area']), reverse=True)
@@ -500,6 +511,7 @@ def show_anns(anns):
         x, y = bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2
         
         ax.text(x, y, f'{area:.2f}', fontsize=12, color='black', ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
+    ax.savefig(outpath)
 def get_center_coordinates(box):
     x1, y1, x2, y2 = box
     center_x = (x1 + x2) / 2
@@ -518,7 +530,12 @@ def show_mask(mask, ax, random_color=False):
         color = np.array([30/255, 144/255, 255/255, 0.6])
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
-    ax.imshow(mask_image)
+    ax.imshow(mask_image)#
+
+
+
+
+
 
 def convmasktoimg(mask):
     if random_color:
@@ -611,8 +628,7 @@ def findWhitestPixel(img):
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thresh)
     #max_loc_array = [max_loc[0],max_loc[1]]
     max_loc_array = [int(max_loc[0] * (100/scale_percent)), int(max_loc[1] * (100/scale_percent))]
-    print(f"Coordinates of most white pixel: {max_loc_array}")
-    print(f"Total number of white pixels: {total_white_pixels}")
+
     return max_loc_array
 
 def findWhitestPixel_contours(img):
@@ -648,10 +664,10 @@ def findWhitestPixel_contours(img):
 
     # Extract coordinates of three centroids with highest area
     coords = centroids[:3]
-    print(coords)
+
     scaledcoord = np.array([[int(i[0] * (100/scale_percent)), int(i[1] * (100/scale_percent))] for i in coords])
 
-    print(f"Coordinates of most white pixel: {scaledcoord}")
+
     #print(f"Total number of white pixels: {total_white_pixels}")
     return scaledcoord
 def binary_mask_to_rgb(mask):
@@ -661,9 +677,8 @@ def binary_mask_to_rgb(mask):
 
 def extract_histogram(series, image, maskfield='segmentation'): # applied to a dataframe of masks with the original image as input
     # Convert image to HSV color space
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    print(type(hsv))
-    print('This is the mask type:', type(series[maskfield]))
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
     #print(series[maskfield])
     # Create a mask with only the pixels in the masked area
     #masked_hsv = np.where(series[maskfield][..., None], hsv, 0)
@@ -690,16 +705,48 @@ def extract_histogram(series, image, maskfield='segmentation'): # applied to a d
     #axs[2].set_title('Value')
     #plt.show()
     return series
-def plothistograms(series):
+
+import numpy as np
+
+import numpy as np
+
+def plothistograms(series, outpath):
     # Plot the histograms
-    fig, axs = plt.subplots(3)
-    axs[0].plot(series['h_hist'] )
-    axs[0].set_title('Hue')
+    fig, axs = plt.subplots(1, 3, figsize=(34, 4))
+    h_median = getMedianFromHist(series['h_hist'])
+    axs[0].plot(series['h_hist'])
+    axs[0].axvline(h_median, color='black', linestyle='dashed')
+    axs[0].set_title('Hue', fontsize=12)
+    axs[0].set_xlim([0, 179])  # Set the x-axis limit for Hue
+
+    s_median = getMedianFromHist(series['s_hist'])
     axs[1].plot(series['s_hist'])
-    axs[1].set_title('Saturation')
+    axs[1].axvline(s_median, color='black', linestyle='dashed')
+    axs[1].set_title('Saturation', fontsize=12)
+    axs[1].set_xlim([0, 255])  # Set the x-axis limit for Saturation
+
+    v_median = getMedianFromHist(series['v_hist'])
     axs[2].plot(series['v_hist'])
-    axs[2].set_title('Value')
-    plt.show()
+    axs[2].axvline(v_median, color='black', linestyle='dashed')
+    axs[2].set_title('Value', fontsize=12)
+    axs[2].set_xlim([0, 255])  # Set the x-axis limit for Value
+
+    # Convert median HSV values to RGB color
+    median_color = hsv_to_rgb(np.array([h_median, s_median, v_median]) / 255)
+
+    # Create a small legend-like icon
+    icon = Rectangle((0, 0), 0.05, 0.1, facecolor=median_color, transform=fig.transFigure, figure=fig)
+
+    # Add the icon to the top right corner of the figure
+    fig.patches.extend([icon])
+    icon.set_clip_on(False)
+    icon.set_xy((0.88, 0.98))
+
+    fig.suptitle('cluster ' + series['class'], fontsize=20, y=1.07)
+    plt.savefig(outpath + '_' + series['class'] + '.png', bbox_inches='tight', pad_inches=0.1)
+    plt.close()
+
+
 def scaleimage(image, scale_percent):
     # Downscale image
     width = int(image.shape[1] * scale_percent / 100)
@@ -720,7 +767,7 @@ def get_overlapping(series, overlapagainst):
 
     # If overlap percentage is greater than 10%, then masks overlap
     #print(overlap_percentage)
-    if overlap_percentage > 0.8:
+    if overlap_percentage > 0.5:
         #print('Masks overlap')
         series['overlap'] = True
     else:
@@ -772,9 +819,7 @@ def cluster_segments(masks_df):
 
     # Reshape the data into a matrix of shape (18, 1)
     #data = data.reshape(-1, 1)
-    print(data.shape)
-    print(type(data))
-    print(data)
+
 
     # Perform k-means clustering with two clusters on similarity matrix
     if len(masks_df) > 1:
@@ -782,10 +827,10 @@ def cluster_segments(masks_df):
 
         # Predict which cluster each data point belongs to
         labels = kmeans.predict(data)
-        print(labels)
-        masks_df['class'] = labels
+        print('Inside cluster labels: ',labels)
+        masks_df['class'] = labels.astype(str)
     else:
-        masks_df['class'] = 0
+        masks_df['class'] = 'unknown'
 
     return masks_df
 
@@ -858,3 +903,190 @@ def defineGloveObject(df):
 
     return df   
 
+
+def is_image_binary(image):
+    #img = cv2.imread(image, cv2.IMREAD_GRAYSCALE)  # Read the image as grayscale
+    unique_pixel_values = np.unique(image[0]) 
+    if np.array_equal(unique_pixel_values, np.array([False])) or np.array_equal(unique_pixel_values, np.array([False, True])) :  # Check if the image is binary
+        return True
+    else:
+        return False
+
+
+def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96):
+    # Find the contours of the mask
+    height, width = original.shape[:2]
+    figsize = (width / dpi, height / dpi)
+    
+    plt.figure(figsize=figsize, dpi=dpi)
+    print('Here are the labels: ', maskdf[labelfield])
+    plt.imshow(original, cmap='gray')
+    unique_labels = maskdf[labelfield].unique()
+    colormap = ListedColormap(plt.cm.rainbow(np.linspace(0, 1, len(unique_labels))))
+    label_color_map = dict(zip(unique_labels, colormap.colors))
+
+    for index, row in maskdf.iterrows():
+        if is_image_binary(row['segmentation']):
+            row['segmentation'] = binary_mask_to_rgb(row['segmentation'])
+        contours, hierarchy = cv2.findContours(row['segmentation'], cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        for contour in contours:
+            # Find the centroid of the contour
+            M = cv2.moments(contour)
+            if M['m00'] != 0:
+                cx = int(M['m10']/M['m00'])
+                cy = int(M['m01']/M['m00'])
+
+                # Draw the contour
+
+                label = row[labelfield] if labelfield in row.keys() and row[labelfield] else 'unknown'
+                contour_color = label_color_map[label]
+                plt.plot(contour[:, 0, 0], contour[:, 0, 1], linewidth=2, color=contour_color)
+
+                # Draw the label
+                if label != 'unknown':
+                    plt.text(cx, cy, label, fontsize=12, color=contour_color, ha='center', va='center',
+                             bbox=dict(facecolor='white', edgecolor='none', boxstyle='round,pad=0.2'))
+            else:
+                print("Warning: Division by zero in centroid calculation skipped.")
+    plt.axis('off')
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    plt.savefig(outpath, bbox_inches='tight', pad_inches=0)
+    plt.close()
+
+
+
+
+
+
+
+if config['maskobject_QS3D']:
+    predictor = loadSAMpredictor()
+    sam = loadSAM()
+
+def maskoutobject_QS3D(series, writetestimages= True, scale_percent = 5):
+    start_time = time.time()
+        
+    if str(series.get('maskimg_path')) == 'nan' or config['overwrite_maskimg']:
+        print('Generating mask for this image: ', series['dev-img_path'])
+        original = cv2.imread(str(series['dev-img_path']))
+        original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
+
+        if Path(Path(config['workspace']) / 'masktemplates/basemasks').is_dir():
+            cammask = getCammask(series, Path(config['workspace']) / 'masktemplates/basemasks')
+        else:
+            print('Cammask not found')
+
+        frameless = applyMask(cammask, original)
+        
+
+        
+        gloveobject = colourkeyMask(frameless)
+        gloveobjectclean = undesired_objects(gloveobject)
+        invgloveobjectclean  = cv2.bitwise_not(gloveobjectclean )
+        bk = np.full(original.shape, 0, dtype=np.uint8)  
+        fg_masked = cv2.bitwise_and(original, original, mask=gloveobjectclean)
+        bk_masked = cv2.bitwise_and(bk, bk, mask=invgloveobjectclean) 
+        final = cv2.bitwise_or(fg_masked, bk_masked)
+        print(f"conventional-processing time: {time.time() - start_time:.4f} seconds")
+        img = scaleimage(original, scale_percent)
+        mask_generator_2 = SamAutomaticMaskGenerator(
+            model=sam,
+            points_per_batch=320,
+            points_per_side=8,
+            pred_iou_thresh=0.70,
+            stability_score_thresh=0.70,
+            crop_n_layers=1,
+            crop_n_points_downscale_factor=1,
+            min_mask_region_area=20,  
+        )
+        masks2 = mask_generator_2.generate(img)
+        print(f"sam-processing time: {time.time() - start_time:.4f} seconds")
+        masks_df = pd.DataFrame(masks2)
+        #show_masks_df = masks_df.copy()
+        #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
+        masks_df['class'] = 'unknown'
+        show_mask_asoutline(masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')), labelfield='class')
+        ###check if masks in masks_df overlap with gloveobjectclean take only overlapping
+        gloveobjectclean_down = scaleimage(gloveobjectclean, scale_percent)
+
+        masks_df = masks_df.apply(get_overlapping, overlapagainst = gloveobjectclean_down, axis=1)
+        masks_df = masks_df[masks_df['overlap'] == True]
+        #show_masks_df = masks_df.copy()
+        #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
+        show_masks_df = masks_df.append(pd.DataFrame([{'segmentation':gloveobjectclean_down, 'class':'glove-object'}]))
+        show_mask_asoutline(show_masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.samoverlap.png')), labelfield='class')
+        if not masks_df.empty:
+            #masks_df = masks_df[masks_df['area'] < 9000]
+            masks_df = masks_df.nlargest(14, 'predicted_iou').reset_index(drop=True)
+            #masks_df_area_iou = masks_df.nlargest(9, 'area').reset_index(drop=True)
+            masks_df_area_iou  = masks_df.apply(extract_histogram, image = img, axis=1)
+            masks_df_area_iou = cluster_segments(masks_df_area_iou)
+            masks_df_area_iou = merge_masks(masks_df_area_iou)
+            show_mask_asoutline(masks_df_area_iou, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.2clusters.png')), labelfield='class')
+            masks_df_area_iou  = masks_df_area_iou.apply(extract_histogram, image = img, axis=1)
+            masks_df_area_iou.apply(plothistograms, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.2clusters_hist.png')) , axis=1)
+            masks_df_area_iou = defineGloveObject(masks_df_area_iou)
+            masks_df_area_iou = merge_masks(masks_df_area_iou)
+
+
+
+            if masks_df_area_iou['class'].str.contains('unknown').any(): 
+                print('Second round of segmentation')
+
+                whitestpixelcoords = findWhitestPixel_contours(final)
+                print('This should be the base for bbox', masks_df_area_iou.loc[0]['segmentation'])
+                #rgbmask = ODlib.binary_mask_to_rgb(masks_df_area_iou.loc[0]['segmentation'], channels=3)
+                
+                #x,y,w,h = ODlib.getBoundingBox(rgbmask)         
+                #input_box = np.array([x,y,x+w,y+h])
+                input_box = masks_df_area_iou.loc[0]['bbox']
+                print('This should be the bbox: ', input_box)
+                input_label = np.array([int(0) for i in range(len(whitestpixelcoords))])
+                center = get_center_coordinates(input_box)
+                input_points = whitestpixelcoords
+
+                if input_points.size == 0:
+                    print('No points found')
+                    input_points = np.array([center])
+                    input_label = np.array([int(1)])  
+                            
+                print(len(input_points), 'input points', len(input_label), 'input labels')
+                
+                predictor.set_image(img)
+                masks, scores, logits = predictor.predict(
+                    point_coords=input_points ,
+                    point_labels=input_label,
+                    box=input_box[None, :],
+                    multimask_output=False,
+                )
+                h, w = masks.shape[-2:]
+                mask_image = masks.reshape(h, w)
+                print('mask image shape', mask_image.shape)
+                masks_df_area_iou['segmentation'] = [mask_image]
+                masks_df_area_iou['class'] = 'object'
+
+ 
+        
+        
+        rgbmask = binary_mask_to_rgb(masks_df_area_iou[masks_df_area_iou['class']=='object'].iloc[0]['segmentation'])
+        object_mask = scaleimage(rgbmask, 2000)
+        kernel = np.ones((64,64),np.uint8)
+        mask= cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, kernel)
+        series['maskimg_path'] = series['rawimg_path'].with_name(series['rawimg_path'].name + '.mask.png')
+        print(f"rest-processing time : {time.time() - start_time:.4f} seconds")
+        cv2.imwrite(str(series['maskimg_path']),mask)
+        print(f"writing time: {time.time() - start_time :.4f} seconds")
+        #original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
+        #show_anns(masks2, str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')))
+        finalmaskdf = pd.DataFrame([{'segmentation': mask, 'class': 'object'}])
+        
+        show_mask_asoutline(finalmaskdf, original, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.final.png')), labelfield='class')
+        #plt.figure( figsize=(10,10))
+        #plt.imshow(original)
+        #show_mask(mask, plt.gca())
+        #show_box(input_box, plt.gca())
+        #show_points(input_points, input_label, plt.gca())
+        #plt.show()
+        #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
+    return series
