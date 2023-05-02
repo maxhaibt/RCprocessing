@@ -712,24 +712,27 @@ import numpy as np
 
 def plothistograms(series, outpath):
     # Plot the histograms
-    fig, axs = plt.subplots(1, 3, figsize=(34, 4))
+    fig, axs = plt.subplots(1, 3, figsize=(34, 5))
     h_median = getMedianFromHist(series['h_hist'])
     axs[0].plot(series['h_hist'])
     axs[0].axvline(h_median, color='black', linestyle='dashed')
-    axs[0].set_title('Hue', fontsize=12)
+    axs[0].set_title('Hue', fontsize=34)
     axs[0].set_xlim([0, 179])  # Set the x-axis limit for Hue
+    axs[0].tick_params(axis='both', labelsize=32)
 
     s_median = getMedianFromHist(series['s_hist'])
     axs[1].plot(series['s_hist'])
     axs[1].axvline(s_median, color='black', linestyle='dashed')
-    axs[1].set_title('Saturation', fontsize=12)
+    axs[1].set_title('Saturation', fontsize=34)
     axs[1].set_xlim([0, 255])  # Set the x-axis limit for Saturation
+    axs[1].tick_params(axis='both', labelsize=32)
 
     v_median = getMedianFromHist(series['v_hist'])
     axs[2].plot(series['v_hist'])
     axs[2].axvline(v_median, color='black', linestyle='dashed')
-    axs[2].set_title('Value', fontsize=12)
+    axs[2].set_title('Value', fontsize=34)
     axs[2].set_xlim([0, 255])  # Set the x-axis limit for Value
+    axs[2].tick_params(axis='both', labelsize=32)
 
     # Convert median HSV values to RGB color
     median_color = hsv_to_rgb(np.array([h_median, s_median, v_median]) / 255)
@@ -742,7 +745,7 @@ def plothistograms(series, outpath):
     icon.set_clip_on(False)
     icon.set_xy((0.88, 0.98))
 
-    fig.suptitle('cluster ' + series['class'], fontsize=20, y=1.07)
+    fig.suptitle('cluster ' + series['class'], fontsize=40, y=1.2)
     plt.savefig(outpath + '_' + series['class'] + '.png', bbox_inches='tight', pad_inches=0.1)
     plt.close()
 
@@ -913,11 +916,15 @@ def is_image_binary(image):
         return False
 
 
-def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96):
+def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96, reference_width=300):
     # Find the contours of the mask
     height, width = original.shape[:2]
     figsize = (width / dpi, height / dpi)
-    
+
+    # Calculate the scaling factor
+
+    scaling_factor = width / reference_width
+
     plt.figure(figsize=figsize, dpi=dpi)
     print('Here are the labels: ', maskdf[labelfield])
     plt.imshow(original, cmap='gray')
@@ -938,14 +945,13 @@ def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96):
                 cy = int(M['m01']/M['m00'])
 
                 # Draw the contour
-
                 label = row[labelfield] if labelfield in row.keys() and row[labelfield] else 'unknown'
                 contour_color = label_color_map[label]
-                plt.plot(contour[:, 0, 0], contour[:, 0, 1], linewidth=2, color=contour_color)
+                plt.plot(contour[:, 0, 0], contour[:, 0, 1], linewidth=2 * scaling_factor, color=contour_color)
 
                 # Draw the label
                 if label != 'unknown':
-                    plt.text(cx, cy, label, fontsize=12, color=contour_color, ha='center', va='center',
+                    plt.text(cx, cy, label, fontsize=12 * scaling_factor, color=contour_color, ha='center', va='center',
                              bbox=dict(facecolor='white', edgecolor='none', boxstyle='round,pad=0.2'))
             else:
                 print("Warning: Division by zero in centroid calculation skipped.")
@@ -959,12 +965,11 @@ def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96):
 
 
 
-
 if config['maskobject_QS3D']:
     predictor = loadSAMpredictor()
     sam = loadSAM()
 
-def maskoutobject_QS3D(series, writetestimages= True, scale_percent = 5):
+def maskoutobject_QS3D(series, scale_percent = 5):
     start_time = time.time()
         
     if str(series.get('maskimg_path')) == 'nan' or config['overwrite_maskimg']:

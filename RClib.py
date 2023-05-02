@@ -28,7 +28,7 @@ config = loadconfigs('.\config_scanner.json')
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
     for scan_id in Path(inputdirectory).iterdir():
-        if scan_id.is_dir() and not scan_id in config['excludescanids']:
+        if scan_id.is_dir() and not scan_id.stem in config['excludescanids']:
             scan = {}
             scan['id']= scan_id.stem
             scan['processingstate'] = pd.DataFrame({'command': 'provide_scandf', 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': True}, index=['datetime'])
@@ -54,16 +54,78 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     return pd.DataFrame(scandf)
 
 def provide_imageinfo_scanner(series):
-    print(series['rawimg_path'].stem)
+    #print('provide_imageinfo_scanner: ', series['rawimg_path'].stem)
     cam, cam2 , objectidfile, roundnumber, imgnumber = series['rawimg_path'].stem.split('_')
-    series['cam_id'] = cam + '_'+ cam2
+    series['cam_id'] = cam + '_'+ cam2 if cam + '_'+ cam2 in config['expected_cam_ids'] else None
+    if series['cam_id'] is None:
+        print('cam_id not in expected_cam_ids: ', series['rawimg_path'].stem)
     #image_dict['objectid'] = scan_id.split('-')[2]
     series['roundnumber'] = roundnumber
     imgnumber = imgnumber.replace('.jpg','')
     series['imgnumber'] = int(imgnumber.replace('test',''))
     return series
 
+import pandas as pd
 
+
+### This is more complicated then I thought.
+def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
+    #print(df.columns)
+    
+    df['shotnumber'] = np.nan
+    newdf = pd.DataFrame(columns=(df.columns))
+    for name, group in df.groupby('roundnumber'):
+        maxi = int(len(group) / 12)
+        group = group.sort_values(by='imgnumber').reset_index(drop=True)
+        for i in range(1, maxi):    
+            print('i: ', i)
+            shotdf = pd.DataFrame(columns=(df.columns))
+            # exclude from group the rows which are already in newdf
+            groupmod = group[~group['rawimg_path'].isin(newdf['rawimg_path'].to_list())]
+            # sort shotdf['cam_id'].to_list() and config['expected_cam_ids'] and compare
+            t = 0
+            for index, row in groupmod.iterrows():
+                if not sorted(shotdf['cam_id'].to_list()) == sorted(config['expected_cam_ids']) :
+                    
+                    if row['cam_id'] not in shotdf['cam_id'].to_list() :
+                        if int(row['imgnumber']) > shotdf['imgnumber'].max() + 6:
+                            print('skip due to high imgnumber')
+                            break
+
+                        #print('Cam_id: ', row['cam_id'], ' is added')
+                        #print(shotdf['cam_id'].to_list() )
+                        row['shotnumber'] = i
+                        shotdf = pd.concat([shotdf, row.to_frame().transpose()])
+                        #print(row['rawimg_path'].stem, ' is added')
+                    else :
+                        print( 'skip cam_id: ', row['cam_id'])
+                        t = t + 1
+                        
+                        if t>5:
+                            print('t>5')
+                            #shotdf = pd.concat([shotdf, row.to_frame().transpose()])
+                            break
+                else:
+                    break
+            #if sorted(shotdf['cam_id'].to_list()) == sorted(config['expected_cam_ids']) :
+            print('shotdf complete. Range of imgnumbers: ', shotdf['imgnumber'].min(), ' - ', shotdf['imgnumber'].max())
+            newdf = pd.concat([newdf, shotdf])
+            i += 1
+
+                    
+       
+    return newdf
+            
+
+
+    
+
+        
+    
+
+
+    # Return the modified DataFrame with the new 'shotnumber' column
+    return grouped
 
 
 def baseimageIsDevimage(series):
