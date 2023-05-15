@@ -12,6 +12,8 @@ import geopandas as gpd
 from shapely.geometry import box, Polygon
 from shapely.affinity import rotate
 import xml.etree.ElementTree as ET
+import re
+import matplotlib.pyplot as plt
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
@@ -39,6 +41,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
                 scan['pp3file'] = [config['constantpp3file']]
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
             scan['orthoboxfile'] = [file for file in scan['scan_dir'].rglob("*.rcortho")]
+            scan['scannerlogfile'] = [file for file in scan['scan_dir'].rglob("00-*")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
                 if not file.stem.endswith('.mask'):
@@ -53,6 +56,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)
 
+
 def provide_imageinfo_scanner(series):
     #print('provide_imageinfo_scanner: ', series['rawimg_path'].stem)
     cam, cam2 , objectidfile, roundnumber, imgnumber = series['rawimg_path'].stem.split('_')
@@ -65,7 +69,193 @@ def provide_imageinfo_scanner(series):
     series['imgnumber'] = int(imgnumber.replace('test',''))
     return series
 
-import pandas as pd
+
+def importRegisteredParameters(scan):
+
+    #find the registered parameters csv-file use glob
+    camparam_path = [file for file in scan['scan_dir'].rglob("*camparam.csv")]
+    print('importRegisteredParameters: ', scan['id'], camparam_path)
+    if len(camparam_path) == 0:
+        print('No camparam.csv file found in ', scan['scan_dir'])
+
+    if len(camparam_path) >= 1:
+        
+        #create a new column 'name' in the scan['imagedf'], which is a dataframe, that contains the image stem not the Path-object contained in the column 'rawimg_path'
+        scan['imagedf']['#name'] = scan['imagedf']['rawimg_path'].apply(lambda x: x.name)
+        #read the csv-file as a dataframe and join it with the scan['image_df'] based on the image name. The csv-file has column's names written in the first row
+        imported = pd.read_csv(camparam_path[0], sep=',', header=0)
+        #print(imported['#name'])
+        #print(scan['imagedf']['#name'])
+        merged = pd.merge(scan['imagedf'],imported, on='#name', how='left')
+        scan['imagedf'] = merged
+        return scan
+
+def calculateParametersStats(scan):
+    print('calculateParametersStats: ', scan['id'])
+    #calculate the mean and the standard deviation of the parameters for each camera
+    #group the scan['image_df'] by the camera id, calculate the mean standard deviation for each of the parameters: f,px,py,k1,k2,k3,k4,t1,t2
+    for parameter in ['f','px','py','k1','k2','k3','k4','t1','t2']:
+        if parameter in scan['imagedf'].columns:
+            #print(scan['imagedf'][parameter])
+            scan['imagedf'][parameter+'_mean'] = scan['imagedf'].groupby('cam_id')[parameter].transform('mean')
+            scan['imagedf'][parameter+'_std'] = scan['imagedf'].groupby('cam_id')[parameter].transform('std')
+            #print (parameter, scan['imagedf'][parameter+'_mean'].unique(), scan['imagedf'][parameter+'_std'].unique())
+    return scan
+
+
+def plotParametersStats(allscan):
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    # Merging the scan['imagedf'] from each scan in allscan
+    merged_df = pd.concat([scan['imagedf'] for index, scan in allscan.iterrows()])
+    print(len(merged_df[merged_df['f'].notnull()]), len(merged_df))
+
+    resultparams = pd.DataFrame()
+
+    # Pre-fill resultparams with expected cameras
+    expected_cams_df = pd.DataFrame(config['expected_cam_ids'], columns=['cam_id'])
+    resultparams = pd.concat([resultparams, expected_cams_df], ignore_index=True)
+
+    # From the merged df, plot the histogram of the parameters for each camera
+    unique_cam_ids = merged_df['cam_id'].unique()
+    num_cameras = len(unique_cam_ids)
+
+    for parameter in ['f', 'px', 'py']:
+
+        # Define the number of rows and columns for the subplots
+        ncols = 3
+        nrows = (num_cameras + ncols - 1) // ncols
+
+        # Create subplots
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(12, 6 * nrows))
+        axes = axes.ravel()
+
+        for index, cam_id in enumerate(unique_cam_ids):
+            cam_df = merged_df[merged_df['cam_id'] == cam_id]
+
+            Q1 = cam_df[parameter].quantile(0.25)
+            Q3 = cam_df[parameter].quantile(0.75)
+            IQR = Q3 - Q1
+
+            # Filter out outliers using the IQR method
+            filtered_df = cam_df[(cam_df[parameter] >= (Q1 - 1.5 * IQR)) & (cam_df[parameter] <= (Q3 + 1.5 * IQR))]
+
+            mean_val = filtered_df[parameter].mean()
+            std_val = filtered_df[parameter].std()
+
+
+            resultparams.loc[resultparams['cam_id'] == cam_id, parameter + '_mean'] = mean_val
+            resultparams.loc[resultparams['cam_id'] == cam_id, parameter + '_std'] = std_val
+
+            # Plotting histograms
+            axes[index].hist(filtered_df[parameter], bins=40)
+            axes[index].axvline(mean_val, color='r', linestyle='-', linewidth=1, label=f'Mean: {mean_val:.2f}')
+            axes[index].axvline(mean_val + std_val, color='g', linestyle='--', linewidth=1, label=f'Std: {std_val:.2f}')
+            axes[index].axvline(mean_val - std_val, color='g', linestyle='--', linewidth=1)
+
+            axes[index].set_xlabel(parameter)
+            axes[index].set_ylabel('Amount of camera poses')
+            axes[index].set_title(f'{parameter} distribution for {cam_id} (ex. outliers)')
+
+            # Set the x-axis limits based on the specified minimum and maximum values
+            if parameter == 'f':
+                x_min = 25
+                x_max = 35
+            if parameter == 'px' or parameter == 'py':
+                x_min = -0.1
+                x_max = 0.1
+            axes[index].set_xlim(x_min, x_max)
+            axes[index].legend()
+
+        # Remove any unused subplots
+        for index in range(num_cameras, nrows * ncols):
+            fig.delaxes(axes[index])
+
+        plt.tight_layout()
+        plt.show()
+
+
+    resultparams.reset_index(drop=True, inplace=True)
+    return resultparams
+
+
+    
+
+
+
+
+def extract_timestamps(series):
+    timestamp_pattern = r"(finish|start)_timestamp:\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{6})"
+    timestamps = {}
+    if 'scannerlogfile' in series.keys() and series['scannerlogfile'] and Path(series['scannerlogfile'][0]).is_file():
+        #print('logfile: ', series['scannerlogfile'][0])
+
+        with open(series['scannerlogfile'][0], 'r') as file:
+            content = file.read()
+            matches = re.findall(timestamp_pattern, content)
+            
+            for match in matches:
+                key, value = match
+                #rint(key, value)
+                timestamps[key] = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+        series['timestamps'] = timestamps
+        series['duration'] = timestamps['finish'] - timestamps['start']
+    return series
+
+def extract_creation_datetime(series):
+    creation_time_key = 'DateTimeOriginal'
+    
+    # Open the image
+    with Image.open(series['rawimg_path']) as img:
+        # Get the EXIF data
+        exif_data = img._getexif()
+        
+        if exif_data:
+            # Convert the EXIF tag ID to tag names
+            exif = {TAGS[k]: v for k, v in exif_data.items() if k in TAGS}
+            
+            if creation_time_key in exif:
+                # Extract the creation datetime as a string
+                creation_time_str = exif[creation_time_key]
+                
+                # Convert the string to a datetime object
+                creation_time = datetime.strptime(creation_time_str, '%Y:%m:%d %H:%M:%S')
+                series['creation_datetime'] = creation_time
+        else:
+            print("No EXIF data found.")
+    return series
+
+def calculate_duration(series):
+    min_datetime = series.min()
+    max_datetime = series.max()
+    duration = max_datetime - min_datetime
+    return duration
+
+
+
+def plot_duration_histogram(df, num_bins=120):
+    # Convert the durations to a common unit (e.g., minutes) for better visualization
+    durations_in_minutes = df['duration'].dt.total_seconds()
+
+    # Specify the figure size (width, height) in inches
+    plt.figure(figsize=(12, 6))
+
+    # Create a histogram with suitable labels and increased number of bins
+    plt.hist(durations_in_minutes, bins=num_bins)
+    plt.xlabel('Scanning duration per object (seconds)')
+    plt.ylabel('Amount of objects')
+    plt.title('Histogram of Scanning Durations')
+
+    # Set the x-axis limits based on the specified minimum and maximum values
+    x_min = 60
+    x_max = 300
+    plt.xlim(x_min, x_max)
+
+    plt.savefig(Path(config['workspace']) / 'scanduration_histogram.png')
+
+
+
 
 
 ### This is more complicated then I thought.
@@ -108,7 +298,7 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
                 else:
                     break
             #if sorted(shotdf['cam_id'].to_list()) == sorted(config['expected_cam_ids']) :
-            print('shotdf complete. Range of imgnumbers: ', shotdf['imgnumber'].min(), ' - ', shotdf['imgnumber'].max())
+            print('shotdf complete ', len(shotdf),'. Range of imgnumbers: ', shotdf['imgnumber'].min(), ' - ', shotdf['imgnumber'].max())
             newdf = pd.concat([newdf, shotdf])
             i += 1
 
@@ -117,8 +307,6 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
     return newdf
             
 
-
-    
 
         
     
@@ -140,6 +328,9 @@ def defineRawTherapeeOutput(series, foldername=''):
 def defineRealityCaptureOutput(series, foldername=''):
     series['RCoutputfolder'] = Path(config['workspace']) / series['id'] / foldername
     series['RCoutputfolder'].mkdir(exist_ok=True)
+    if config['overwrite_all_rcproj'] :
+        shutil.rmtree(series['RCoutputfolder'])
+        series['RCoutputfolder'].mkdir(exist_ok=True)
     return series
 
 def defineResultOutput(series, foldername=''):

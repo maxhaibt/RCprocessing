@@ -885,11 +885,11 @@ def defineGloveObject(df):
         v_hist_corr = cv2.compareHist(df.iloc[0]['v_hist'], df.iloc[1]['v_hist'], cv2.HISTCMP_CORREL)
         # If the correlation between the 's_hist' histograms is greater than 0.95,
         # classify both segments as object
-        print('Median of first hist S: ', getMedianFromHist(df.iloc[0]['s_hist']))
-        print('Median of second hist S: ', getMedianFromHist(df.iloc[1]['s_hist']))
-        print('Max of first hist V: ', getMedianFromHist(df.iloc[0]['v_hist'],part=0.75))
-        print('Max of second hist V: ', getMedianFromHist(df.iloc[1]['v_hist'],part=0.75))
-        print('Correlation between the two histograms: ', s_hist_corr)
+        #print('Median of first hist S: ', getMedianFromHist(df.iloc[0]['s_hist']))
+        #print('Median of second hist S: ', getMedianFromHist(df.iloc[1]['s_hist']))
+        #print('Max of first hist V: ', getMedianFromHist(df.iloc[0]['v_hist'],part=0.75))
+        #print('Max of second hist V: ', getMedianFromHist(df.iloc[1]['v_hist'],part=0.75))
+        #print('Correlation between the two histograms: ', s_hist_corr)
 
         if getMedianFromHist(df.iloc[0]['s_hist']) < getMedianFromHist(df.iloc[1]['s_hist']) and getMedianFromHist(df.iloc[0]['v_hist'], part=0.75) > 190 and getMedianFromHist(df.iloc[0]['v_hist'], part=0.75) > getMedianFromHist(df.iloc[1]['v_hist'], part=0.75) :
             df['class'] = ['glove', 'object']
@@ -926,7 +926,7 @@ def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96, reference
     scaling_factor = width / reference_width
 
     plt.figure(figsize=figsize, dpi=dpi)
-    print('Here are the labels: ', maskdf[labelfield])
+    #print('Here are the labels: ', maskdf[labelfield])
     plt.imshow(original, cmap='gray')
     unique_labels = maskdf[labelfield].unique()
     colormap = ListedColormap(plt.cm.rainbow(np.linspace(0, 1, len(unique_labels))))
@@ -964,7 +964,6 @@ def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96, reference
 
 
 
-
 if config['maskobject_QS3D']:
     predictor = loadSAMpredictor()
     sam = loadSAM()
@@ -972,7 +971,7 @@ if config['maskobject_QS3D']:
 def maskoutobject_QS3D(series, scale_percent = 5):
     start_time = time.time()
         
-    if str(series.get('maskimg_path')) == 'nan' or config['overwrite_maskimg']:
+    if 'maskimg_path' not in series.keys() or str(series.get('maskimg_path')) == 'nan' or config['overwrite_maskimg']:
         print('Generating mask for this image: ', series['dev-img_path'])
         original = cv2.imread(str(series['dev-img_path']))
         original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
@@ -998,7 +997,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         mask_generator_2 = SamAutomaticMaskGenerator(
             model=sam,
             points_per_batch=320,
-            points_per_side=8,
+            points_per_side=16,
             pred_iou_thresh=0.70,
             stability_score_thresh=0.70,
             crop_n_layers=1,
@@ -1011,7 +1010,8 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #show_masks_df = masks_df.copy()
         #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
         masks_df['class'] = 'unknown'
-        show_mask_asoutline(masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')), labelfield='class')
+        if config['maskobject_QS3D_visualized']:
+            show_mask_asoutline(masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')), labelfield='class')
         ###check if masks in masks_df overlap with gloveobjectclean take only overlapping
         gloveobjectclean_down = scaleimage(gloveobjectclean, scale_percent)
 
@@ -1019,8 +1019,10 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         masks_df = masks_df[masks_df['overlap'] == True]
         #show_masks_df = masks_df.copy()
         #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
-        show_masks_df = masks_df.append(pd.DataFrame([{'segmentation':gloveobjectclean_down, 'class':'glove-object'}]))
-        show_mask_asoutline(show_masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.samoverlap.png')), labelfield='class')
+        if config['maskobject_QS3D_visualized']:
+            show_masks_df = masks_df.append(pd.DataFrame([{'segmentation':gloveobjectclean_down, 'class':'glove-object'}]))
+        
+            show_mask_asoutline(show_masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.samoverlap.png')), labelfield='class')
         if not masks_df.empty:
             #masks_df = masks_df[masks_df['area'] < 9000]
             masks_df = masks_df.nlargest(14, 'predicted_iou').reset_index(drop=True)
@@ -1040,13 +1042,13 @@ def maskoutobject_QS3D(series, scale_percent = 5):
                 print('Second round of segmentation')
 
                 whitestpixelcoords = findWhitestPixel_contours(final)
-                print('This should be the base for bbox', masks_df_area_iou.loc[0]['segmentation'])
+                #print('This should be the base for bbox', masks_df_area_iou.loc[0]['segmentation'])
                 #rgbmask = ODlib.binary_mask_to_rgb(masks_df_area_iou.loc[0]['segmentation'], channels=3)
                 
                 #x,y,w,h = ODlib.getBoundingBox(rgbmask)         
                 #input_box = np.array([x,y,x+w,y+h])
                 input_box = masks_df_area_iou.loc[0]['bbox']
-                print('This should be the bbox: ', input_box)
+                #print('This should be the bbox: ', input_box)
                 input_label = np.array([int(0) for i in range(len(whitestpixelcoords))])
                 center = get_center_coordinates(input_box)
                 input_points = whitestpixelcoords
@@ -1067,10 +1069,10 @@ def maskoutobject_QS3D(series, scale_percent = 5):
                 )
                 h, w = masks.shape[-2:]
                 mask_image = masks.reshape(h, w)
-                print('mask image shape', mask_image.shape)
+                #print('mask image shape', mask_image.shape)
                 masks_df_area_iou['segmentation'] = [mask_image]
                 masks_df_area_iou['class'] = 'object'
-
+    
  
         
         
@@ -1085,8 +1087,8 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
         #show_anns(masks2, str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')))
         finalmaskdf = pd.DataFrame([{'segmentation': mask, 'class': 'object'}])
-        
-        show_mask_asoutline(finalmaskdf, original, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.final.png')), labelfield='class')
+        if config['maskobject_QS3D_visualized']:
+            show_mask_asoutline(finalmaskdf, original, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.final.png')), labelfield='class')
         #plt.figure( figsize=(10,10))
         #plt.imshow(original)
         #show_mask(mask, plt.gca())
@@ -1094,4 +1096,6 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #show_points(input_points, input_label, plt.gca())
         #plt.show()
         #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
+    else: 
+        print('Mask already exists')
     return series
