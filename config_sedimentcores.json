@@ -1,0 +1,27 @@
+{
+    "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
+    "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
+    "messagepath": "E:/WES_paleoenvi/utils",
+    "workspace": "E:/WES_paleoenvi/URUK26",
+    "excludescanids": [],
+    "alignmentreport_template": "E:/GitHub/RCprocessing/AlignmentView.html",
+    "overwrite_dev-img": false,
+    "overwrite_imagelist": true,
+    "align": true,
+    "reconstruct": true,
+    "texture": true,
+    "overwrite_all_rcproj": false,
+    "overwrite_alignment_rcproj": true,
+    "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment.rccmd",
+    "reconstructsettings": "E:/GitHub/RCprocessing/RCsettings_reconstruction.rccmd",
+    "texturingsettings": "E:/GitHub/RCprocessing/RCsettings_texturing.rccmd",
+    "use_gcps": true,
+    "constantgcps": "",
+    "gcpsparamfile":"E:/GitHub/RCprocessing/gcps_param.xml",
+    "baseimageformat":"*.dng",
+    "devimage_param":" -b8 -tz ",
+    "devimage_format": ".tif",
+    "exportsettings1": "E:/GitHub/RCprocessing/export_param.xml",
+    "exportname_prefix": "Zed-ext_0000001_"
+}
+    

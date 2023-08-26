@@ -6,14 +6,94 @@ import os
 import json
 import itertools
 import pandas as pd
+import exifread
 import pathconfig
-from datetime import datetime 
+from datetime import datetime, timedelta 
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
 
 
+import os
+import exifread
+from datetime import datetime, timedelta
+from shutil import move
 
+
+def locateColorPatches():
+    # Load the image
+    img = io.imread('image.jpg')
+
+    # Convert the image to grayscale
+    gray = color.rgb2gray(img)
+
+    # Detect edges using the Canny algorithm
+    edges = feature.canny(gray)
+
+    # Find contours in the image
+    contours = feature.corner_peaks(feature.corner_harris(edges), min_distance=5)
+
+    # Sort the contours by x and y coordinates
+    contours = sorted(contours, key=lambda x: (x[0], x[1]))
+
+    # Calculate the patch size
+    patch_size = int(np.mean(np.diff(contours[:, 0])))
+
+    # Define the patch locations
+    patch_locs = []
+    for y in range(patch_size//2, 4*patch_size, patch_size):
+        for x in range(patch_size//2, 6*patch_size, patch_size):
+            patch_locs.append((x, y))
+
+    print(patch_locs)
+
+
+
+
+def sort_image_series(folderpath):
+    # List all files in folderpath
+    files = os.listdir(folderpath)
+    # Filter only JPG and DNG files
+    files = [f for f in files if f.endswith('.JPG') or f.endswith('.dng')]
+    
+    # Read image metadata using exifread
+    image_data = []
+    for f in files:
+        path = os.path.join(folderpath, f)
+        with open(path, 'rb') as file:
+            tags = exifread.process_file(file, details=False)
+            datetime_str = str(tags.get('EXIF DateTimeOriginal'))
+            datetime_obj = datetime.strptime(datetime_str, '%Y:%m:%d %H:%M:%S')
+            image_data.append({'filename': f, 'datetime': datetime_obj})
+    
+    # Sort image data by datetime
+    image_data.sort(key=lambda x: x['datetime'])
+    
+    # Cluster images by datetime
+    clusters = []
+    cluster_start = None
+    for data in image_data:
+        if cluster_start is None:
+            cluster_start = data['datetime']
+            clusters.append([data['filename']])
+        else:
+            time_diff = data['datetime'] - cluster_start
+            if time_diff <= timedelta(seconds=60):
+                clusters[-1].append(data['filename'])
+                cluster_start = data['datetime']
+            else:
+                cluster_start = data['datetime']
+                clusters.append([data['filename']])
+                cluster_start = data['datetime']
+    
+    # Create new folders and move images into them
+    for i, cluster in enumerate(clusters):
+        new_folder = os.path.join(folderpath, f'cluster_{i+1}')
+        os.makedirs(new_folder)
+        for filename in cluster:
+            src_path = os.path.join(folderpath, filename)
+            dst_path = os.path.join(new_folder, filename)
+            shutil.move(src_path, dst_path)
 
 def loadconfigs(configpath):
     with open(configpath) as configfile:
