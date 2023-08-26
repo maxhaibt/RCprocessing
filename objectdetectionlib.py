@@ -996,7 +996,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         img = scaleimage(original, scale_percent)
         mask_generator_2 = SamAutomaticMaskGenerator(
             model=sam,
-            points_per_batch=320,
+            points_per_batch=32,
             points_per_side=16,
             pred_iou_thresh=0.70,
             stability_score_thresh=0.70,
@@ -1096,6 +1096,5 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #show_points(input_points, input_label, plt.gca())
         #plt.show()
         #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
-    else: 
-        print('Mask already exists')
+
     return series

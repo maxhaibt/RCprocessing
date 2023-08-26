@@ -14,6 +14,8 @@ from shapely.affinity import rotate
 import xml.etree.ElementTree as ET
 import re
 import matplotlib.pyplot as plt
+import pyvista as pv
+import open3d as o3d
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
@@ -25,7 +27,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('.\config_scanner.json')
+config = loadconfigs('.\config_sedimentcores.json')
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
@@ -41,6 +43,8 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
                 scan['pp3file'] = [config['constantpp3file']]
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
             scan['orthoboxfile'] = [file for file in scan['scan_dir'].rglob("*.rcortho")]
+            scan['boxfile'] = [Path(file) for file in scan['scan_dir'].rglob("*base.rcbox")]
+            scan['camregistrationpath'] = [file for file in scan['scan_dir'].rglob("*camregistration.csv")]
             scan['scannerlogfile'] = [file for file in scan['scan_dir'].rglob("00-*")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
@@ -56,6 +60,172 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)
 
+def loadCameraPoses(points_csv_path):
+    camera_poses_df = pd.read_csv(points_csv_path, skiprows=1)
+    # Extract the filename from the 'name' column
+    #print(camera_poses_df.columns)
+    camera_poses_df['filename'] = camera_poses_df['#name'].apply(lambda x: Path(x).name)
+    return camera_poses_df
+
+def read_rcbox(rcbox_path):
+    #print(type(rcbox_path))
+    if rcbox_path.is_file():
+        # Parse the XML file
+        tree = ET.parse(rcbox_path)
+        root = tree.getroot()
+        # Extract the necessary information from the XML
+        depth, width, height = [float(val) for val in root.find('widthHeightDepth').text.split()]
+        x, y, z = [float(val) for val in root.find('CentreEuclid/centre').text.split()]
+        yaw, pitch, roll = [float(val) for val in root.find('yawPitchRoll').text.split()]
+        
+        global_coord_system = root.get('globalCoordinateSystem')
+        global_coord_system_name = root.get('globalCoordinateSystemName')
+        
+        rcbox = {
+            'name': rcbox_path.stem,
+            'size': {'width': width, 'height': height, 'depth': depth},
+            'center': {'x': x, 'y': y, 'z': z},
+            'orientation': {'yaw': yaw, 'pitch': pitch, 'roll': roll},
+            'globalCoordinateSystem': global_coord_system,
+            'globalCoordinateSystemName': global_coord_system_name
+        }
+    return rcbox
+
+def write_rcbox(rcbox, output_path):
+    # Create the XML root element with its attributes
+    root = ET.Element('ReconstructionRegion', {
+        'globalCoordinateSystem': rcbox['globalCoordinateSystem'],
+        'globalCoordinateSystemWkt': "",
+        'globalCoordinateSystemName': rcbox['globalCoordinateSystemName'],
+        'isGeoreferenced': "1",
+        'isLatLon': "0"
+    })
+    
+    # Add the yawPitchRoll element
+    yaw, pitch, roll = rcbox['orientation']['yaw'], rcbox['orientation']['pitch'], rcbox['orientation']['roll']
+    ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
+    
+    # Add the widthHeightDepth element
+    width, height, depth = rcbox['size']['width'], rcbox['size']['height'], rcbox['size']['depth']
+    ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
+    
+    # Add the Header element (keeping it same as the provided XML)
+    ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
+    
+    # Add the CentreEuclid element
+    centre_euclid = ET.SubElement(root, "CentreEuclid")
+    x, y, z = rcbox['center']['x'], rcbox['center']['y'], rcbox['center']['z']
+    ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
+    
+    # Add the Residual element (keeping it same as the provided XML)
+    ET.SubElement(root, "Residual", {
+        'R': "1 0 0 0 1 0 0 0 1",
+        't': "0 0 0",
+        's': "1",
+        'ownerId': "{2B36705F-74C9-4270-BED3-074F279D427B}"
+    })
+    
+    # Serialize the XML tree to a file
+    tree = ET.ElementTree(root)
+    tree.write(output_path)
+
+def rotate_geometry_around_center(boxmesh, yaw, pitch, roll):
+    # Compute individual rotation matrices
+    R_yaw = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([yaw, 0, 0])
+    R_pitch = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([0, pitch, 0])
+    R_roll = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([0, 0, roll])
+    
+    # Compute the composite rotation matrix
+    R = np.matmul(R_yaw, np.matmul(R_pitch, R_roll))
+    
+    # Apply the rotation
+    boxmesh.rotate(R, center=boxmesh.get_center())
+    return boxmesh
+
+
+
+def generate_mesh_of_rcbox(rcbox):
+    boxmesh = o3d.geometry.TriangleMesh.create_box(width=rcbox['size']['width'], height=rcbox['size']['height'], depth=rcbox['size']['depth'], create_uv_map=False, map_texture_to_each_face=False) 
+    #print(f'Center of mesh: {boxmesh.get_center()}')
+    boxmesh.translate((rcbox['center']['x'], rcbox['center']['y'], rcbox['center']['z']), relative=False)
+    print(f'Center of mesh: {boxmesh.get_center()}')
+    boxmesh = rotate_geometry_around_center(boxmesh, rcbox['orientation']['yaw'], rcbox['orientation']['pitch'], rcbox['orientation']['roll'])
+    rcbox['geometry'] = boxmesh
+    return rcbox
+
+def scale_axis(box, x_factor, y_factor, z_factor):
+    # Create a scaling matrix
+    scale_mat =  np.array([
+        [x_factor, 0, 0, 0],
+        [0, y_factor, 0, 0],
+        [0, 0, z_factor, 0],
+        [0, 0, 0, 1]
+    ])
+    # Apply the scaling
+    #print(scale_mat)
+    box['geometry'] = box['geometry'].transform(scale_mat)
+    return box
+
+
+def query_cams_in_rcbox(scan, boxfield='rcbox', outfield='cams_in_box'):
+    points = scan['imagedf'][['x', 'y', 'z']].values
+    print('This is points: ',points)
+    point_cloud = pv.PointSet(points)
+    print('This is points: ',point_cloud)
+    points_in_box_list = []
+    
+    box = scan[boxfield]['geometry']
+    points_inside_box_polydata = box.select_enclosed_points(point_cloud)
+    points_inside = points_inside_box_polydata.points
+    print(points_inside)
+    
+    return scan
+
+def createGCPfile_forsedimentcores(scan) -> None:
+    # Load the GCPs from the CSV file
+    gcps_df = pd.read_csv(config['basegcps'])
+
+    # Load the GeoPackage file
+    gcp_startpoints_gdf = gpd.read_file(config["GCPstartpointfile"])
+    
+    # Extract the first part of scan['id'] (e.g., URUK27)
+    first_part = scan['id'].split('_')[0].replace("URUK", "URUK ").replace("Uruk", "URUK ")  # add space
+    
+    # Find the corresponding point in the GeoPackage file
+    start_point = gcp_startpoints_gdf[gcp_startpoints_gdf['Name'] == first_part]
+    if len(start_point) == 0:
+        raise ValueError(f"No point found in GeoPackage file with name '{first_part}'")
+    
+    # Extract the XYZ coordinates of the start point
+    start_point_coords = start_point.iloc[0]['geometry'].coords[0]
+    
+    # Extract the second part of scan['id'] (e.g., 0to1m) and determine the Z translation
+    second_part = scan['id'].split('_')[1]
+    z_translation = -int(second_part.split('to')[0])
+    
+    # Apply the affine transformation to the GCPs
+    gcps_df['X'] += start_point_coords[0]
+    gcps_df['Y'] += start_point_coords[1]
+    gcps_df['Z'] += start_point_coords[2] + z_translation
+    # read the start_rcbox
+    rcbox = read_rcbox(Path(config['start_rcbox']))
+    # Generate the mesh of the rcbox
+    rcbox = generate_mesh_of_rcbox(rcbox)
+    # Apply the affine transformation to the rcbox
+    rcbox['geometry']= rcbox['geometry'].translate((start_point_coords[0], start_point_coords[1], start_point_coords[2] + z_translation), relative=False)
+    rcbox['center']['x'] = rcbox['geometry'].get_center()[0]
+    rcbox['center']['y'] = rcbox['geometry'].get_center()[1]  
+    rcbox['center']['z'] = rcbox['geometry'].get_center()[2]     
+    # Write the modified GCPs to a new CSV file
+    output_path = Path(scan['scan_dir']) / "modified_rcgcps.csv"
+    gcps_df.to_csv(output_path, index=False)
+    scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
+    
+
+    # Write the modified XML content to the same file
+    output_path_rcbox = Path(scan['scan_dir']) / "base.rcbox"
+    write_rcbox(rcbox, output_path_rcbox)
+    return scan
 
 def provide_imageinfo_scanner(series):
     #print('provide_imageinfo_scanner: ', series['rawimg_path'].stem)
@@ -70,10 +240,10 @@ def provide_imageinfo_scanner(series):
     return series
 
 
-def importRegisteredParameters(scan):
+def importRegisteredParameters(scan, searchfilename='*camparam.csv'):
 
     #find the registered parameters csv-file use glob
-    camparam_path = [file for file in scan['scan_dir'].rglob("*camparam.csv")]
+    camparam_path = [file for file in scan['scan_dir'].rglob(searchfilename)]
     print('importRegisteredParameters: ', scan['id'], camparam_path)
     if len(camparam_path) == 0:
         print('No camparam.csv file found in ', scan['scan_dir'])
@@ -90,17 +260,6 @@ def importRegisteredParameters(scan):
         scan['imagedf'] = merged
         return scan
 
-def calculateParametersStats(scan):
-    print('calculateParametersStats: ', scan['id'])
-    #calculate the mean and the standard deviation of the parameters for each camera
-    #group the scan['image_df'] by the camera id, calculate the mean standard deviation for each of the parameters: f,px,py,k1,k2,k3,k4,t1,t2
-    for parameter in ['f','px','py','k1','k2','k3','k4','t1','t2']:
-        if parameter in scan['imagedf'].columns:
-            #print(scan['imagedf'][parameter])
-            scan['imagedf'][parameter+'_mean'] = scan['imagedf'].groupby('cam_id')[parameter].transform('mean')
-            scan['imagedf'][parameter+'_std'] = scan['imagedf'].groupby('cam_id')[parameter].transform('std')
-            #print (parameter, scan['imagedf'][parameter+'_mean'].unique(), scan['imagedf'][parameter+'_std'].unique())
-    return scan
 
 
 def plotParametersStats(allscan):
@@ -268,7 +427,7 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
         maxi = int(len(group) / 12)
         group = group.sort_values(by='imgnumber').reset_index(drop=True)
         for i in range(1, maxi):    
-            print('i: ', i)
+            #print('i: ', i)
             shotdf = pd.DataFrame(columns=(df.columns))
             # exclude from group the rows which are already in newdf
             groupmod = group[~group['rawimg_path'].isin(newdf['rawimg_path'].to_list())]
@@ -279,7 +438,7 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
                     
                     if row['cam_id'] not in shotdf['cam_id'].to_list() :
                         if int(row['imgnumber']) > shotdf['imgnumber'].max() + 6:
-                            print('skip due to high imgnumber')
+                            #print('skip due to high imgnumber')
                             break
 
                         #print('Cam_id: ', row['cam_id'], ' is added')
@@ -288,17 +447,17 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
                         shotdf = pd.concat([shotdf, row.to_frame().transpose()])
                         #print(row['rawimg_path'].stem, ' is added')
                     else :
-                        print( 'skip cam_id: ', row['cam_id'])
+                        #print( 'skip cam_id: ', row['cam_id'])
                         t = t + 1
                         
                         if t>5:
-                            print('t>5')
+                            #print('t>5')
                             #shotdf = pd.concat([shotdf, row.to_frame().transpose()])
                             break
                 else:
                     break
             #if sorted(shotdf['cam_id'].to_list()) == sorted(config['expected_cam_ids']) :
-            print('shotdf complete ', len(shotdf),'. Range of imgnumbers: ', shotdf['imgnumber'].min(), ' - ', shotdf['imgnumber'].max())
+            #print('shotdf complete ', len(shotdf),'. Range of imgnumbers: ', shotdf['imgnumber'].min(), ' - ', shotdf['imgnumber'].max())
             newdf = pd.concat([newdf, shotdf])
             i += 1
 

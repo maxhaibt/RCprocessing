@@ -62,14 +62,24 @@ def process_files(file_paths, progress, status, should_continue):
                         dst_transform=transform,
                         dst_crs='EPSG:32638')
 
-        # Translate to GeoPackage
-        gdal.Translate(str(output_gpkg_path), str(output_path), format='GPKG', creationOptions=['TILE_FORMAT=JPEG'])
+        with Env(GDAL_PAM_ENABLED='YES'):
+            # Translate to GeoPackage
+            gdal.Translate(str(output_gpkg_path), str(output_path), format='GPKG', creationOptions=['TILE_FORMAT=PNG', 'NODATA_VALUE=0'])
 
-        # Generate overviews
-        ds = gdal.Open(str(output_gpkg_path), gdal.GA_Update)
-        gdal.SetConfigOption('COMPRESS_OVERVIEW', 'JPEG')
-        ds.BuildOverviews('CUBIC', [2, 4, 8, 16, 32, 64])
-        ds = None  # Close the file
+            # Open the dataset
+            ds = gdal.Open(str(output_gpkg_path), gdal.GA_Update)
+
+            # Create a new transparency band where we set the black and near black pixels as transparent
+            for i in range(1, ds.RasterCount + 1):
+                band = ds.GetRasterBand(i)
+                band_array = band.ReadAsArray()
+                band_array[band_array < 10] = 0
+                band.SetNoDataValue(0)  # Set NoData value to 0
+                band.WriteArray(band_array)
+
+            # Generate overviews
+            gdal.SetConfigOption('COMPRESS_OVERVIEW', 'JPEG')
+            ds.BuildOverviews('NEAREST', [2, 4, 8, 16, 32, 64, 128])
 
         # Update the progress bar
         progress["value"] = i + 1
