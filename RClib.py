@@ -13,6 +13,7 @@ from shapely.geometry import box, Polygon
 from shapely.affinity import rotate
 import xml.etree.ElementTree as ET
 import re
+import math
 import matplotlib.pyplot as plt
 import pyvista as pv
 import open3d as o3d
@@ -44,7 +45,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
             scan['orthoboxfile'] = [file for file in scan['scan_dir'].rglob("*.rcortho")]
             scan['boxfile'] = [Path(file) for file in scan['scan_dir'].rglob("*base.rcbox")]
-            scan['camregistrationpath'] = [file for file in scan['scan_dir'].rglob("*camregistration.csv")]
+            scan['camregistrationpath'] = [Path(file) for file in scan['scan_dir'].rglob("*camregistration.csv")]
             scan['scannerlogfile'] = [file for file in scan['scan_dir'].rglob("00-*")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
@@ -60,38 +61,200 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)
 
-def loadCameraPoses(points_csv_path):
-    camera_poses_df = pd.read_csv(points_csv_path, skiprows=1)
-    # Extract the filename from the 'name' column
-    #print(camera_poses_df.columns)
-    camera_poses_df['filename'] = camera_poses_df['#name'].apply(lambda x: Path(x).name)
-    return camera_poses_df
+def visualize_rcbox(rcbox):
+    print("Let's define some primitives")
+
+
+    #mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    mesh_box = rcbox['geometry']
+    mesh_box.compute_vertex_normals()
+    mesh_box.paint_uniform_color([0.9, 0.1, 0.1])
+    #print(mesh_box)
+    #mesh_box.compute_vertex_normals()
+    #mesh_box.paint_uniform_color([0.9, 0.1, 0.1])
+
+    print("We draw a few primitives using collection.")
+    o3d.visualization.draw_geometries([mesh_box])
+
+def create_scaling_matrix(sx, sy, sz):
+    """
+    Create a 3D scaling matrix.
+    """
+    return np.array([
+        [sx, 0, 0, 0],
+        [0, sy, 0, 0],
+        [0, 0, sz, 0],
+        [0, 0, 0, 1]
+    ])
+
+def create_object_coordinate_frame(x, y, z, x_length, y_length, z_length):
+    # Create a coordinate frame with unit size
+    coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[x, y, z])
+       
+    return coord_frame
+
+
+
+
+def tranformmatrix_to_local(rcbox):
+    # Extract the transformations
+    translation = rcbox['transform_to_local']['translation_matrix']
+    rotation = rcbox['transform_to_local']['rotation_matrix']
+
+    print(rotation)
+    
+    # Create a 4x4 identity matrix
+    to_local_matrix = np.eye(4)
+    
+    # Set the rotation
+    to_local_matrix[:3, :3] = rotation  # Transpose of the rotation matrix
+    
+    # Set the translation (inverse)
+    to_local_matrix[:3, 3] = translation
+    
+    return to_local_matrix
+
+def transformmatrix_to_global(rcbox):
+    # Extract the transformations
+    translation = rcbox['transform_to_local']['translation_matrix']
+    rotation = rcbox['transform_to_local']['rotation_matrix']
+
+    # Create a 4x4 identity matrix
+    to_global_matrix = np.eye(4)
+    
+    # Set the rotation
+    to_global_matrix[:3, :3] = rotation.T
+    
+    # Set the translation
+    to_global_matrix[:3, 3] = -translation
+    
+    return to_global_matrix
+
+def persistent_translate(rcbox, x, y, z):
+    #create translation matrix
+    translation_matrix = np.array([x, y, z])
+    rcbox['geometry'].translate(translation_matrix, relative=True)
+    #document inverted translation_matrix
+    rcbox['transform_to_local']['translation_matrix'] = rcbox['transform_to_local']['translation_matrix'] -translation_matrix
+    return rcbox
+
+def localspace_rotation(rcbox, yaw, pitch, roll):
+    # transform the rcbox to the local space
+    to_local_matrix = tranformmatrix_to_local(rcbox)
+    localgeom = rcbox['geometry'].transform(to_local_matrix)
+    # convert to radians
+    yaw_rad = math.radians(yaw)
+    pitch_rad = math.radians(pitch)
+    roll_rad = math.radians(roll)
+    # Create a rotation matrix
+    R = o3d.geometry.Geometry3D.get_rotation_matrix_from_yxz([yaw_rad, pitch_rad, roll_rad])
+    # Apply the rotation
+    print('Back to local center should be 000:',localgeom.get_center())
+    locallymodified = localgeom.rotate(R, center=[0,0,0])
+    # transform the locally modified geometry of the rcbox to the global space
+    to_global_matrix = transformmatrix_to_global(rcbox)
+    print('back matrix is: ', to_global_matrix)
+    # Apply the global transformation to the locally modified geometry
+    rcbox['geometry'] = locallymodified.transform(to_global_matrix)
+    #rcbox['geometry'] = locallymodified
+    rcbox['transform_to_local']['rotation_matrix'] = rcbox['transform_to_local']['rotation_matrix'] @ R.T
+    return rcbox
+
+
+def localspace_scale(rcbox, scale_x, scale_y, scale_z, save=True):
+    # Transform the rcbox to the local space
+    to_local_matrix = tranformmatrix_to_local(rcbox)
+    localgeom = rcbox['geometry'].transform(to_local_matrix)
+    
+    # Create a scaling matrix
+    S = np.array([
+        [scale_x, 0, 0, 0],
+        [0, scale_y, 0, 0],
+        [0, 0, scale_z, 0],
+        [0, 0, 0, 1]
+    ])
+    print('S: ', S)
+    
+    # Apply the scaling in local space
+    locally_scaled = localgeom.transform(S)
+    
+    # Transform the locally scaled geometry of the rcbox back to the global space
+    to_global_matrix = transformmatrix_to_global(rcbox)
+    
+    # Apply the global transformation to the locally scaled geometry
+    rcbox['geometry'] = locally_scaled.transform(to_global_matrix)
+    
+    # Update the scaling matrix in the rcbox's transform_to_local
+    if save:
+        rcbox['transform_to_local']['scale_matrix'] = rcbox['transform_to_local']['scale_matrix'] @ S
+    
+    return rcbox
 
 def read_rcbox(rcbox_path):
-    #print(type(rcbox_path))
     if rcbox_path.is_file():
         # Parse the XML file
         tree = ET.parse(rcbox_path)
         root = tree.getroot()
+        print(root.text)
         # Extract the necessary information from the XML
-        depth, width, height = [float(val) for val in root.find('widthHeightDepth').text.split()]
+        depth_RC, width_RC, height_RC = [float(val) for val in root.find('widthHeightDepth').text.split()]
         x, y, z = [float(val) for val in root.find('CentreEuclid/centre').text.split()]
         yaw, pitch, roll = [float(val) for val in root.find('yawPitchRoll').text.split()]
         
         global_coord_system = root.get('globalCoordinateSystem')
         global_coord_system_name = root.get('globalCoordinateSystemName')
-        
+
+        # Create a cube (box)
+        #WARNING open3D width,height,depth are switched compared to reality capture
+        #width in open3d is x-directional length is depth in RC
+        #height in open3d is y-directional length is width in RC
+        #depth in open3d is  z-directional length is height in RC   
+        cube = o3d.geometry.TriangleMesh.create_box(width=depth_RC, height=width_RC, depth=height_RC)
+        cube = cube.translate([0,0,0], relative=False)
         rcbox = {
             'name': rcbox_path.stem,
-            'size': {'width': width, 'height': height, 'depth': depth},
-            'center': {'x': x, 'y': y, 'z': z},
-            'orientation': {'yaw': yaw, 'pitch': pitch, 'roll': roll},
-            'globalCoordinateSystem': global_coord_system,
-            'globalCoordinateSystemName': global_coord_system_name
-        }
+            'geometry': cube,
+            'transform_to_local': {'translation_matrix': np.array([0, 0, 0]), 
+                                   'rotation_matrix': np.identity(3), 
+                                   'scale_matrix': np.array([
+                                        [1, 0, 0, 0],
+                                        [0, 1, 0, 0],
+                                        [0, 0, 1, 0],
+                                        [0, 0, 0, 1]]),
+            'globalCoordinateSystem': '',
+            'globalCoordinateSystemName': ''
+        }}
+
+        # apply the global transformations from the rcbox file
+        rcbox = persistent_translate(rcbox, x, y, z)
+        rcbox = localspace_rotation(rcbox, yaw, pitch, roll) 
+        rcbox['globalCoordinateSystem'] = global_coord_system
+        rcbox['globalCoordinateSystemName'] = global_coord_system_name  
+        print(rcbox)
+        
     return rcbox
 
-def write_rcbox(rcbox, output_path):
+
+
+def rotation_matrix_to_euler_angles(R):
+    yaw = math.atan2(R[1, 0], R[0, 0])
+    pitch = math.atan2(-R[2, 0], math.sqrt(R[2, 1]**2 + R[2, 2]**2))
+    roll = math.atan2(R[2, 1], R[2, 2])
+    
+    return [yaw, pitch, roll]
+
+def write_rcbox(rcbox):
+    # Extract the dimensions from the geometry
+    bounds = rcbox['geometry'].get_axis_aligned_bounding_box().get_extent()
+    depth, width, height = bounds
+    
+    # Extract the rotation matrix and convert it to Euler angles
+    rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
+    yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
+    
+    # Convert the Euler angles to degrees
+    yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
+
     # Create the XML root element with its attributes
     root = ET.Element('ReconstructionRegion', {
         'globalCoordinateSystem': rcbox['globalCoordinateSystem'],
@@ -102,11 +265,9 @@ def write_rcbox(rcbox, output_path):
     })
     
     # Add the yawPitchRoll element
-    yaw, pitch, roll = rcbox['orientation']['yaw'], rcbox['orientation']['pitch'], rcbox['orientation']['roll']
     ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
     
     # Add the widthHeightDepth element
-    width, height, depth = rcbox['size']['width'], rcbox['size']['height'], rcbox['size']['depth']
     ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
     
     # Add the Header element (keeping it same as the provided XML)
@@ -114,7 +275,7 @@ def write_rcbox(rcbox, output_path):
     
     # Add the CentreEuclid element
     centre_euclid = ET.SubElement(root, "CentreEuclid")
-    x, y, z = rcbox['center']['x'], rcbox['center']['y'], rcbox['center']['z']
+    x, y, z = rcbox['geometry'].get_center()
     ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
     
     # Add the Residual element (keeping it same as the provided XML)
@@ -127,59 +288,39 @@ def write_rcbox(rcbox, output_path):
     
     # Serialize the XML tree to a file
     tree = ET.ElementTree(root)
-    tree.write(output_path)
-
-def rotate_geometry_around_center(boxmesh, yaw, pitch, roll):
-    # Compute individual rotation matrices
-    R_yaw = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([yaw, 0, 0])
-    R_pitch = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([0, pitch, 0])
-    R_roll = o3d.geometry.Geometry3D.get_rotation_matrix_from_zyx([0, 0, roll])
+    return tree
     
-    # Compute the composite rotation matrix
-    R = np.matmul(R_yaw, np.matmul(R_pitch, R_roll))
+def generate_rcortho(rcbox, width, height, colorType, modelName, boxSideCornerIndices):
+    # Generate the root XML element for the rcortho file
+    attributes = {
+        'width': str(width),
+        'height': str(height),
+        'name': "Ortho projection 2",
+        'modelName': modelName,
+        'modelGuid': "{4C1E40FE-7A70-4837-A884-187882800364}",
+        'colorType': colorType,
+        'boxSideConerIndex': str(boxSideCornerIndices),
+        'bEmpty': "0",
+        'backFaceColorType': "1",
+        'backFaceColor': "2139127936",
+        'projectionType': "0",
+        'bShowOrthoProjection': "1"
+    }
     
-    # Apply the rotation
-    boxmesh.rotate(R, center=boxmesh.get_center())
-    return boxmesh
-
-
-
-def generate_mesh_of_rcbox(rcbox):
-    boxmesh = o3d.geometry.TriangleMesh.create_box(width=rcbox['size']['width'], height=rcbox['size']['height'], depth=rcbox['size']['depth'], create_uv_map=False, map_texture_to_each_face=False) 
-    #print(f'Center of mesh: {boxmesh.get_center()}')
-    boxmesh.translate((rcbox['center']['x'], rcbox['center']['y'], rcbox['center']['z']), relative=False)
-    print(f'Center of mesh: {boxmesh.get_center()}')
-    boxmesh = rotate_geometry_around_center(boxmesh, rcbox['orientation']['yaw'], rcbox['orientation']['pitch'], rcbox['orientation']['roll'])
-    rcbox['geometry'] = boxmesh
-    return rcbox
-
-def scale_axis(box, x_factor, y_factor, z_factor):
-    # Create a scaling matrix
-    scale_mat =  np.array([
-        [x_factor, 0, 0, 0],
-        [0, y_factor, 0, 0],
-        [0, 0, z_factor, 0],
-        [0, 0, 0, 1]
-    ])
-    # Apply the scaling
-    #print(scale_mat)
-    box['geometry'] = box['geometry'].transform(scale_mat)
-    return box
-
-
-def query_cams_in_rcbox(scan, boxfield='rcbox', outfield='cams_in_box'):
-    points = scan['imagedf'][['x', 'y', 'z']].values
-    print('This is points: ',points)
-    point_cloud = pv.PointSet(points)
-    print('This is points: ',point_cloud)
-    points_in_box_list = []
+    # Create an empty root
+    root = ET.Element(None)
     
-    box = scan[boxfield]['geometry']
-    points_inside_box_polydata = box.select_enclosed_points(point_cloud)
-    points_inside = points_inside_box_polydata.points
-    print(points_inside)
+    # Create OrthoProjection element and add to root
+    ortho_projection = ET.SubElement(root, 'OrthoProjection', attributes)
+    ET.SubElement(ortho_projection, "Header", {'magic': "5787472", 'version': "2"})
     
-    return scan
+    # Generate the rcbox XML tree and add its root to our main root
+    rcbox_tree = write_rcbox(rcbox)
+    root.append(rcbox_tree.getroot())
+    
+    return root
+    
+
 
 def createGCPfile_forsedimentcores(scan) -> None:
     # Load the GCPs from the CSV file
@@ -209,23 +350,76 @@ def createGCPfile_forsedimentcores(scan) -> None:
     gcps_df['Z'] += start_point_coords[2] + z_translation
     # read the start_rcbox
     rcbox = read_rcbox(Path(config['start_rcbox']))
-    # Generate the mesh of the rcbox
-    rcbox = generate_mesh_of_rcbox(rcbox)
     # Apply the affine transformation to the rcbox
-    rcbox['geometry']= rcbox['geometry'].translate((start_point_coords[0], start_point_coords[1], start_point_coords[2] + z_translation), relative=False)
-    rcbox['center']['x'] = rcbox['geometry'].get_center()[0]
-    rcbox['center']['y'] = rcbox['geometry'].get_center()[1]  
-    rcbox['center']['z'] = rcbox['geometry'].get_center()[2]     
+    rcbox = persistent_translate(rcbox, start_point_coords[0], start_point_coords[1], start_point_coords[2] + z_translation)
+    #print(rcbox['geometry'].get_center())
+    
     # Write the modified GCPs to a new CSV file
     output_path = Path(scan['scan_dir']) / "modified_rcgcps.csv"
     gcps_df.to_csv(output_path, index=False)
     scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
     
 
-    # Write the modified XML content to the same file
+    # Write the modified XML content to a new rcbox-file
+    scan['rcbox'] = rcbox
     output_path_rcbox = Path(scan['scan_dir']) / "base.rcbox"
-    write_rcbox(rcbox, output_path_rcbox)
+    print(output_path_rcbox)
+    tree = write_rcbox(rcbox)
+    tree.write(output_path_rcbox)
     return scan
+
+def loadCameraPoses(scan):
+    print(scan['camregistrationpath'])
+    camera_poses_df = pd.read_csv(scan['camregistrationpath'][0], skiprows=1)
+    
+    # Extract the filename from the 'name' column
+    camera_poses_df['filename'] = camera_poses_df['#name'].apply(lambda x: Path(x).name)
+    
+    # Before merging, check for duplicate columns (excluding 'filename') and drop them from scan['imagedf']
+    duplicate_columns = camera_poses_df.columns.intersection(scan['imagedf'].columns)
+    duplicate_columns = duplicate_columns.drop('filename') if 'filename' in duplicate_columns else duplicate_columns
+    
+    if not duplicate_columns.empty:
+        scan['imagedf'] = scan['imagedf'].drop(columns=duplicate_columns)
+    
+    merged_df = pd.merge(scan['imagedf'], camera_poses_df, on='filename', how='inner')
+    scan['imagedf'] = merged_df
+    return scan
+
+def generate_point_cloud_with_cameras(scan_df):
+    # Extract xyz coordinates from the dataframe
+    points = scan_df[['x', 'y', 'z']].values
+
+    # Create Open3D PointCloud object
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+
+
+    # Create a list of camera names corresponding to each point
+    #camera_names = scan_df['camera_name'].tolist()  # Replace 'camera_name' with the appropriate column name
+
+    return pcd
+
+def get_frontal_cameras(scan):
+    # Step 1: Scale the rcbox by 30 along the local y-axis
+    modified_rcbox = localspace_scale(scan['rcbox'], 1, 30, 1,save=False)
+
+    # Step 2: Create an oriented bounding box around the modified rcbox
+    obb = modified_rcbox['geometry'].get_oriented_bounding_box()
+
+    # Step 3: Generate a point cloud for cameras
+    pcd_cameras = generate_point_cloud_with_cameras(scan['imagedf'])
+
+    # Step 4: Get the indices of cameras inside the bounding box
+    indices = obb.get_point_indices_within_bounding_box(pcd_cameras.points)
+
+    # Step 5: Filter out the points (cameras) in scan['imagedf'] that are not inside the bounding box
+    scan['imagedf'] = scan['imagedf'].iloc[indices]
+    print(f"Number of cameras inside the bounding box: {len(scan['imagedf'])}")
+
+    return scan
+
+
 
 def provide_imageinfo_scanner(series):
     #print('provide_imageinfo_scanner: ', series['rawimg_path'].stem)

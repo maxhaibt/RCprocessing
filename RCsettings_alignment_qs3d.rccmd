@@ -22,7 +22,7 @@
 -set "sfmAutoReconRegionAfterAlignment=TRUE"
 -set "sfmForceComponentRematch=TRUE"
 -set "sfmPreselectorFeatures=30000"
--set "sfmDetectorSensitivity=High"
+-set "sfmDetectorSensitivity=High"      
 -set "sfmMergeGeoreferencedComponents=FALSE"
 -set "sfmDistortionModel= Division"
 -set "appQuitOnError=FALSE"
