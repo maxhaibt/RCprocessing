@@ -15,7 +15,6 @@ import xml.etree.ElementTree as ET
 import re
 import math
 import matplotlib.pyplot as plt
-import pyvista as pv
 import open3d as o3d
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
@@ -28,7 +27,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('.\config_sedimentcores.json')
+config = loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_sedimentcores.json')
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []

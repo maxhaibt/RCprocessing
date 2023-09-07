@@ -51,6 +51,7 @@
     "devimage_format": ".JPG",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "rcorthobox2gis": false
+    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/extracore",
+    "UEdestination": "/Game/WES_paleoenvi/cores/"
 }
     
