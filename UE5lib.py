@@ -1,4 +1,5 @@
 import unreal
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,10 +7,13 @@ import numpy as np
 import os
 import pandas as pd
 
-import RClib as RClib
+#import RClib as RClib
 
 
-
+def loadconfigs(configpath):
+    with open(configpath) as configfile:
+        config = json.load(configfile)
+    return config
 
 
 def provide_meshdf(folder_path):
@@ -166,7 +170,7 @@ def build_import_options(texturestemname: str):
     options.static_mesh_import_data.set_editor_properties({'import_uniform_scale': 100.0})
     options.static_mesh_import_data.set_editor_properties({'build_nanite': True}) 
     # Texture options
-    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath('/Game/WES_paleoenvi/cores/sedimentcores_base_material')})     
+    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath('/Game/UrukModel/UrukModel_basematerial')})     
     options.texture_import_data.set_editor_properties({'material_search_location': unreal.MaterialSearchLocation.LOCAL})
     print(texturestemname)
     options.texture_import_data.set_editor_properties({'base_diffuse_texture_name' : texturestemname})                                        
@@ -197,6 +201,7 @@ def build_import_tasks(filename: str, texture_files: list, destination_path: str
     obj_task.set_editor_property("options", options)
     fbxfactory = build_fbxfactory(obj_task)
     obj_task.set_editor_property("factory", fbxfactory)
+    obj_task.set_editor_property("save", True)
     
 
     # Identify UDIM-texture files and create tasks for each
