@@ -2,8 +2,8 @@
     "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
     "messagepath": "E:/WES_paleoenvi/utils",
-    "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/WES_paleoenvi/cores/URUK15",
-    "excludescanids": [],
+    "workspace": "E:/WES_paleoenvi/URUK27",
+    "excludescanids": ["URUK27_6to7m","URUK27_7to8m","URUK27_8to9m","URUK27_1to2m",  "URUK27_0to1m","URUK27_3to4m","URUK27_4to5m","URUK27_5to6m"],
     "alignmentreport_template": "E:/GitHub/RCprocessingAlignmentView.html",
     "overwrite_dev-img": false,
     "overwrite_imagelist": true,
@@ -29,12 +29,12 @@
     "reconstruct": true,
     "texture": true,
     "orthomosaic": true,
-    "overwrite_all_rcproj": true,
-    "overwrite_alignment_rcproj": true,
+    "overwrite_all_rcproj": false,
+    "overwrite_alignment_rcproj": false,
     "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment_sedimentcores.rccmd",
     "reconstructsettings": "E:/GitHub/RCprocessing/RCsettings_reconstruction.rccmd",
-    "constantrcbox":"",
-    "startorthobox":"E:/WES_paleoenvi/utils/orthomosaicbox_down2.rcortho",
+    "constantrcbox":"", 
+    "startorthobox":"E:/WES_paleoenvi/utils/orthomosaicbox_down2.rcortho",  
     "texturingsettings": "E:/GitHub/RCprocessing/RCsettings_texturing.rccmd",
     "use_gcps": true,
     "constantgcps":"",
@@ -51,6 +51,7 @@
     "devimage_format": ".JPG",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/extracore",
-    "UEdestination": "/Game/WES_paleoenvi/cores/"
+    "meshfolder": "D:/OBJ_ue5",
+    "UEdestination": "/Game/UrukModel/"
 }
+    
