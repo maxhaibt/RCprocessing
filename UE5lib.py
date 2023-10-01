@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import os
 import pandas as pd
+#import open3d as o3d
 
 #import RClib as RClib
 
@@ -170,7 +171,7 @@ def build_import_options(texturestemname: str):
     options.static_mesh_import_data.set_editor_properties({'import_uniform_scale': 100.0})
     options.static_mesh_import_data.set_editor_properties({'build_nanite': True}) 
     # Texture options
-    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath('/Game/UrukModel/UrukModel_basematerial')})     
+    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath('/Game/WES_paleoenvi/cores/basematerial_sedimentcore')})     
     options.texture_import_data.set_editor_properties({'material_search_location': unreal.MaterialSearchLocation.LOCAL})
     print(texturestemname)
     options.texture_import_data.set_editor_properties({'base_diffuse_texture_name' : texturestemname})                                        
@@ -243,7 +244,7 @@ def rename_created_material_instance(destination_path: str, old_material_name: s
     else:
         unreal.log_error(f"Material instance {old_material_name} does not exist in path {destination_path}")
 
-def set_udim_texture_to_material_instance(material_instance_name: str, texture_name: str, parameter_name: str):
+def set_udim_texture_to_material_instance(mesh_import_path: str, material_instance_name: str, texture_name: str, parameter_name: str):
     # Load the material instance and the texture
     material_instance = unreal.EditorAssetLibrary.load_asset(material_instance_name)
     texture = unreal.EditorAssetLibrary.load_asset(texture_name)
@@ -255,12 +256,13 @@ def set_udim_texture_to_material_instance(material_instance_name: str, texture_n
 
     if isinstance(material_instance, unreal.MaterialInstanceConstant):
         # Access the list of texture parameter values
-        texture_params = material_instance.texture_parameter_values
+        texture_params = list(material_instance.texture_parameter_values)  # Make a copy
 
         # Check if the parameter exists and set its value
         param_exists = False
         for param in texture_params:
             if param.parameter_info.name == parameter_name:
+                print(param.parameter_info.name, 'is already in the list.')
                 param.parameter_value = texture
                 param_exists = True
                 break
@@ -270,12 +272,32 @@ def set_udim_texture_to_material_instance(material_instance_name: str, texture_n
             new_param = unreal.TextureParameterValue()
             new_param.parameter_info.name = parameter_name
             new_param.parameter_value = texture
-            texture_params.append(new_param)
+            print('This is the new parameter:', new_param)
+            texture_params.append(new_param)  # Append to the copied list
         
-        # Set the modified texture parameter list back to the material instance
-        #material_instance.texture_parameter_values = texture_params
+        # Use the set_editor_property method
+        material_instance.set_editor_property('texture_parameter_values', texture_params)
+        
+        mesh = unreal.EditorAssetLibrary.load_asset(mesh_import_path)
+
+        if isinstance(mesh, unreal.StaticMesh):
+        # Create a new StaticMaterial object
+            new_static_material = unreal.StaticMaterial()
+            new_static_material.material_interface = material_instance
+
+            # Assign to the first slot (or whichever slot you want to assign to)
+            mesh.static_materials[0] = new_static_material
+            unreal.EditorAssetLibrary.save_asset(mesh_import_path, only_if_is_dirty=False)
+
+        #unreal.EditorAssetLibrary.save_asset(mesh)
+        # Save the modified material instance
+        unreal.EditorAssetLibrary.save_asset(material_instance_name, only_if_is_dirty=False)
+        unreal.EditorAssetLibrary.save_asset(texture_name, only_if_is_dirty=False)
+
     else:
         unreal.log_error("The loaded asset is not a MaterialInstanceConstant!")
+
+
 
 
 def post_import_process(mesh_import_path: str, texture_stem_name: str, destination_path: str):
@@ -283,9 +305,12 @@ def post_import_process(mesh_import_path: str, texture_stem_name: str, destinati
     material_instance_name = mesh_import_path + "_material"
     oldname =  "defaultMat_ncl1_1"
     rename_created_material_instance("/Game/WES_paleoenvi/cores/",oldname, material_instance_name)
-    texture_name = "/Game/WES_paleoenvi/cores/" + texture_stem_name  # Change the path if it's different
-    game_path = destination_path + "/" + material_instance_name
+    texture_name = destination_path + "/" + texture_stem_name  # Change the path if it's different
+    material_path = destination_path + "/" + material_instance_name
+    mesh_path = destination_path + "/" + mesh_import_path
 
-    # Assuming 'BaseTexture' is the parameter name in your material instance where you want to set the UDIM texture.
-    # Change 'BaseTexture' to your actual parameter name if it's different.
-    set_udim_texture_to_material_instance(game_path, texture_name, 'diffuse')
+    set_udim_texture_to_material_instance(mesh_path, material_path, texture_name, 'diffuse')
+
+
+    
+
