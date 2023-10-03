@@ -80,11 +80,14 @@ def transform_real_to_uv(xyz_coords, matrix):
     Returns:
     - Nx2 numpy array of 2D image coordinates.
     """
+    # Compute the inverse of the transformation matrix
+    inv_matrix = np.linalg.inv(matrix)
+    
     # Augment the XYZ coordinates with a fourth dimension (homogeneous 1)
     xyzw1 = np.hstack((xyz_coords, np.ones((xyz_coords.shape[0], 1))))
     
-    # Multiply the XYZW1 coordinates by the transformation matrix
-    uvw = np.dot(xyzw1, matrix.T)
+    # Multiply the XYZW1 coordinates by the inverse transformation matrix
+    uvw = np.dot(xyzw1, inv_matrix.T)
     
     # Convert back to 2D image coordinates
     return uvw[:, :2] / uvw[:, 2:3]
@@ -129,6 +132,9 @@ def create_plane_and_box_with_corners(image_points, ref_points, image_path, imag
     ref_points = np.array(ref_points)
     image_points = np.array(image_points)
     T = compute_projective_transformation(image_points, ref_points)
+    # Load the image to get its dimensions
+    img = o3d.io.read_image(image_path)
+    img_width, img_height = np.asarray(img).shape[1], np.asarray(img).shape[0]
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(ref_points)
@@ -193,6 +199,8 @@ def create_plane_and_box_with_corners(image_points, ref_points, image_path, imag
     obb_corners = np.dot(obb_corners, np.linalg.inv(R.T))
     obb_corners_vector = o3d.utility.Vector3dVector(obb_corners)
     box = o3d.geometry.OrientedBoundingBox.create_from_points(obb_corners_vector)
+   
+
     
     # Convert OrientedBoundingBox to TriangleMesh with UV mapping
     box_mesh = o3d.geometry.TriangleMesh.create_from_oriented_bounding_box(box, create_uv_map=True)
@@ -205,12 +213,12 @@ def create_plane_and_box_with_corners(image_points, ref_points, image_path, imag
     box_mesh.compute_triangle_normals(normalized=True)
     face_normals = np.asarray(box_mesh.triangle_normals)
 
-    # Identify the face that is most parallel to the XY plane
-    target_face_idx = np.argmax(np.dot(face_normals, normal))
-    print(f"Target face index: {target_face_idx}")
+    # Identify the two faces that are most parallel to the XY plane
+    dot_products = np.dot(face_normals, normal)
+    sorted_indices = np.argsort(dot_products)
+    target_face_indices = sorted_indices[-2:]  # Get the last two indices (highest dot products)
 
-
-    # 2. Adjust UV mapping
+    print(f"Target face indices: {target_face_indices}")
 
     # UV coordinates for the entire texture
     full_texture_uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]])
@@ -218,28 +226,53 @@ def create_plane_and_box_with_corners(image_points, ref_points, image_path, imag
     # For simplicity, other vertices will map to a tiny portion of the texture (e.g., top-left corner)
     tiny_texture_uv = np.array([[0, 0]])
 
-    # Create UV coordinates for each vertex
-    uv_coords = np.tile(tiny_texture_uv, (np.asarray(box_mesh.vertices).shape[0], 1))
 
-    # The vertices associated with the target face
-    face_vertices = np.asarray(box_mesh.triangles)[target_face_idx]
 
-    # Update UV coordinates for the target face vertices
-    for idx, vert_idx in enumerate(face_vertices):
-        uv_coords[vert_idx] = full_texture_uv[idx]
 
-    # Assign UV coordinates to the mesh
-    box_mesh.triangle_uvs = o3d.utility.Vector2dVector(uv_coords)
+    # Gather all unique vertices from the target faces
+    unique_vertices = set()
+    for target_face_idx in target_face_indices:
+        face_vertices = np.asarray(box_mesh.triangles)[target_face_idx]
+        unique_vertices.update(face_vertices)
+
+    # Transform and normalize vertices
+    img = o3d.io.read_image(image_path)
+    img_width, img_height = np.asarray(img).shape[1], np.asarray(img).shape[0]
+
+    # Create a mapping of vertex indices to their UV coordinates
+    vertex_to_uv = {}
+
+    for vert_idx, vert in enumerate(box_mesh.vertices):
+        if vert_idx in unique_vertices:
+            xyz = np.asarray(vert)
+            uv = transform_real_to_uv(np.array([xyz]), T)[0]
+            u_normalized = uv[0] / img_width
+            v_normalized = uv[1] / img_height
+            vertex_to_uv[vert_idx] = [u_normalized, v_normalized]
+        else:
+            vertex_to_uv[vert_idx] = [0, 0]  # default value
+
+    # Construct UV coordinates for every vertex of every triangle
+    triangle_uv_coords = []
+    for triangle in box_mesh.triangles:
+        for vert_idx in triangle:
+            triangle_uv_coords.append(vertex_to_uv[vert_idx])
+
+    print('Triangle UV coords', triangle_uv_coords)
+
+    # Assign the UV coordinates to the mesh
+    box_mesh.triangle_uvs = o3d.utility.Vector2dVector(triangle_uv_coords)
+   
 
     # 3. Apply the texture
 
-    texture = o3d.io.read_image(image_path)
-    box_mesh.textures = [texture]
+    #texture = o3d.io.read_image(image_path)
+    box_mesh.textures = [img]
 
     # For visualization using the material
     material = rendering.MaterialRecord()
     material.shader = 'defaultUnlit'
-    material.albedo_img = texture
+    material.albedo_img = img
     o3d.visualization.draw({'name': 'box', 'geometry': box_mesh, 'material': material})
     
 
