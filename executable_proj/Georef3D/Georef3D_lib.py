@@ -8,9 +8,9 @@ from PyQt5.QtWidgets import QApplication
 
 from PyQt5.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsScene, QVBoxLayout, QPushButton,
                              QWidget, QFileDialog, QLabel, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QInputDialog, QMenuBar, QMenu, QAction, QGraphicsEllipseItem, QGraphicsLineItem, QDialog, QComboBox,  QHBoxLayout)
+                             QHeaderView, QInputDialog, QMenuBar, QMenu, QAction, QGraphicsEllipseItem, QGraphicsLineItem, QDialog, QComboBox,  QHBoxLayout, QCheckBox, QLineEdit, QSizePolicy, QSpacerItem)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QBrush
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 import copy
 
 
@@ -201,6 +201,145 @@ class CustomGraphicsView(QGraphicsView):
         """Draw an error line between two points on the QGraphicsScene."""
         line_item = self.scene().addLine(start_point[0], start_point[1], end_point[0], end_point[1], QPen(color))
         return line_item
+    
+
+class CSVStructureDialog(QDialog):
+    # Define a signal to emit the selected data
+    data_imported = pyqtSignal(list)
+    def __init__(self, csv_data=None):
+        super().__init__()
+
+        self.csv_data = csv_data
+        self.mapping = {}
+        self.skip_rows = 0  # Default value for skipping rows
+
+        # Set a reasonable default window size
+        self.setGeometry(100, 100, 800, 400)
+
+        layout = QVBoxLayout(self)
+
+        # Skip Rows Input
+        skip_rows_layout = QHBoxLayout()
+        skip_rows_label = QLabel("Skip Rows:", self)
+        self.skip_rows_input = QLineEdit(self)
+        self.skip_rows_input.setText(str(self.skip_rows))
+        self.skip_rows_input.setMaximumWidth(40)  # Set a maximum width of 40 pixels
+        self.skip_rows_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # Fix the size
+        self.skip_rows_input.textChanged.connect(self.update_skip_rows)
+        skip_rows_layout.addWidget(skip_rows_label)
+        skip_rows_layout.addWidget(self.skip_rows_input)
+        layout.addLayout(skip_rows_layout)
+
+        # Create the table with an additional column for checkboxes and a row for mapping selection
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(len(csv_data[0]) + 1)  # Additional column for checkboxes
+        self.table.setRowCount(len(csv_data) - self.skip_rows + 1)  # Additional row for mapping selection
+
+        self.row_checkboxes = []  # Store row selection checkboxes
+        self.checkbox_states = []  # Store checkbox states
+
+        # Add checkboxes in the additional column (column 0) and mapping selection in the additional row (row 0)
+        for row, row_data in enumerate(csv_data[1 + self.skip_rows:], start=1):  # Skip the header and skipped rows
+            # Add a checkbox for row selection
+            checkbox = QCheckBox(self)
+            self.row_checkboxes.append(checkbox)
+            self.checkbox_states.append(False)  # Initialize all checkboxes as unchecked
+            self.table.setCellWidget(row, 0, checkbox)  # In the extra column (column 0)
+            checkbox.stateChanged.connect(lambda state, row=row: self.checkbox_state_changed(state, row))  # Connect the state change signal
+
+            for col, item in enumerate(row_data):
+                # Set table item
+                table_item = QTableWidgetItem(item)
+                self.table.setItem(row, col + 1, table_item)  # Shift by 1 to accommodate the extra column
+
+        # Set headers (including the additional column)
+        header_labels = [""] + csv_data[0]  # Empty label for the additional column
+        self.table.setHorizontalHeaderLabels(header_labels)
+
+        # Add mapping selection dropdowns in the first row (above the header, excluding the additional column)
+        for col, header in enumerate(csv_data[0]):
+            combo = QComboBox(self)
+            combo.addItems(["-", "u", "v", "x", "y", "z", "name"])  # Added "name" here
+            combo.currentIndexChanged.connect(lambda idx, col=col, combo=combo: self.update_mapping(col, combo))
+            combo.setFixedWidth(self.table.columnWidth(col + 1))  # Set the width of the combo box to match the column width
+            self.table.setCellWidget(0, col + 1, combo)  # Add to the first row (shifted by 1)
+
+        layout.addWidget(self.table)
+
+        # "Select All" checkbox (top-right corner with a margin)
+        select_all_layout = QHBoxLayout()
+        select_all_checkbox = QCheckBox("Select All", self)
+        select_all_checkbox.setChecked(False)  # Uncheck by default
+        select_all_checkbox.stateChanged.connect(self.select_all_rows)
+        select_all_layout.addItem(QSpacerItem(10, 10, QSizePolicy.Expanding, QSizePolicy.Fixed))  # Add margin
+        select_all_layout.addWidget(select_all_checkbox)
+        layout.addLayout(select_all_layout)
+
+        # Import button
+        btn_import = QPushButton("Import Ref Points", self)
+        btn_import.clicked.connect(self.on_import)
+        layout.addWidget(btn_import)
+
+        self.setLayout(layout)
+
+    def update_mapping(self, col, combo):
+        value = combo.currentText()
+        if value != "-":
+            self.mapping[value] = col
+    
+
+
+    def on_import(self):
+        # Find selected rows based on checkbox_states
+        selected_rows = [i for i, state in enumerate(self.checkbox_states) if state]
+        print('selected_rows: ', selected_rows)
+
+        # Initialize the imported_data list
+        imported_data = []
+
+        # Iterate through the selected rows and check the corresponding checkboxes
+        for row in selected_rows:
+            print(f"Row {row} is selected.")
+            #if self.row_checkboxes[row].isChecked():
+            print(f"Row {row} is checked.")
+            row_data = []
+            for col in range(1, self.table.columnCount()):  # Start from column 1 to exclude the checkbox column
+                item = self.table.item(row, col)
+                if item is not None:
+                    row_data.append(item.text())
+                else:
+                    row_data.append("")  # Handle empty cellss
+            imported_data.append(row_data)
+        print(imported_data)
+        # Emit the signal with the imported data
+        self.data_imported.emit(imported_data)
+        self.accept()  # Use self.reject() if you want to cancel the changes
+
+    def select_all_rows(self, state):
+        # Set checkbox states for all rows based on the "Select All" checkbox state
+        self.checkbox_states = [state == Qt.Checked] * len(self.row_checkboxes)
+        # Update the checkboxes to reflect the state change
+        for checkbox in self.row_checkboxes:
+            checkbox.setChecked(state == Qt.Checked)
+
+    def checkbox_state_changed(self, state, row):
+        # Update the checkbox state in the list when a checkbox is clicked
+        self.checkbox_states[row] = state == Qt.Checked
+
+    def update_skip_rows(self):
+        # Update the number of rows to skip based on user input
+        try:
+            self.skip_rows = int(self.skip_rows_input.text())
+        except ValueError:
+            self.skip_rows = 0  # Default to 0 if input is not a valid integer
+
+        # Adjust the table row count based on the new skip_rows value
+        self.table.setRowCount(len(self.csv_data) - self.skip_rows + 1)
+
+        # Reset the checkbox states and mappings when the number of skipped rows changes
+        self.checkbox_states = [False] * len(self.row_checkboxes)
+        self.mapping = {}
+
 class GeoReferencer(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -214,7 +353,9 @@ class GeoReferencer(QMainWindow):
         self.mesh = None
         self.editing_uv_for_row = None
 
-        self.config_file = "config.json"  # Name of the config file
+
+        self.config_file = "config.json" 
+
 
         self.initUI()
 
@@ -304,6 +445,337 @@ class GeoReferencer(QMainWindow):
         self.setCentralWidget(central_widget)
         self.setGeometry(100, 100, 800, 600)
     
+    def handle_imported_data(self, imported_data):
+        # Process the imported data and update the lists
+        print(imported_data)
+        for row_data in imported_data:
+            print(row_data)
+            name = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else ""
+            u, v = (row_data[self.dialog.mapping.get("u", -1)], row_data[self.dialog.mapping.get("v", -1)]) if "u" in self.dialog.mapping and "v" in self.dialog.mapping else (None, None)
+            x, y, z = (row_data[self.dialog.mapping.get("x", -1)], row_data[self.dialog.mapping.get("y", -1)], row_data[self.dialog.mapping.get("z", -1)]) if all(key in self.dialog.mapping for key in ["x", "y", "z"]) else (None, None, None)
+
+            self.refpointnames.append(name)
+            self.image_coordinates.append((u, v))
+            self.real_world_coordinates.append((x, y, z))
+
+
+
+    @pyqtSlot()
+    def load_reference_points(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select a JSON or CSV file", "", "JSON files (*.json);;CSV files (*.csv);;All Files (*)")
+
+        if filepath.endswith(".json"):
+            with open(filepath, 'r') as file:
+                data = json.load(file)
+            self.refpointnames = data.get('name', [])
+            self.image_coordinates = data.get('image_coordinates', [])
+            self.real_world_coordinates = data.get('real_world_coordinates', [])
+
+        elif filepath.endswith(".csv"):
+            import csv
+            with open(filepath, 'r') as file:
+                reader = csv.reader(file)
+                csv_data = list(reader)[:21]  # First 20 rows + header
+
+            self.dialog = CSVStructureDialog(csv_data)
+
+            # Connect the signal to the slot here
+            self.dialog.data_imported.connect(self.handle_imported_data)
+
+
+            result = self.dialog.exec_()
+            print(self.refpointnames)
+            
+
+            #if result == QDialog.Accepted:
+                #self.refpointnames = []
+                #self.image_coordinates = []
+                #self.real_world_coordinates = []
+                
+
+
+        # Determine the number of rows based on the longest list
+        num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
+        self.table.setRowCount(num_rows)
+
+        # Populate the table with the data from the lists
+        for i in range(num_rows):
+            if i < len(self.refpointnames):
+                self.table.setItem(i, 0, QTableWidgetItem(self.refpointnames[i]))
+            if i < len(self.image_coordinates):
+                u, v = self.image_coordinates[i]
+                self.table.setItem(i, 1, QTableWidgetItem(f"{u},{v}"))
+            if i < len(self.real_world_coordinates):
+                x, y, z = self.real_world_coordinates[i]
+                self.table.setItem(i, 2, QTableWidgetItem(f"{x},{y},{z}"))
+
+        self.update_reference_and_corner_points_on_canvas()
+
+    @pyqtSlot()
+    def export_mesh(self):
+        if self.config_data:
+            if self.config_data['translation_on_export']:
+                export_mesh = copy.deepcopy(self.mesh)
+                export_mesh.translate(self.config_data['translation_on_export'])
+                print(f"Mesh translated to {export_mesh.get_center()}.")
+        # Check if mesh exists
+        if not hasattr(self, 'mesh') or not self.mesh.vertices:
+            print("No mesh available for export.")
+            return
+
+        # Open a file dialog for the user to select a save location
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Mesh", "", "OBJ files (*.obj);;All Files (*)")
+        if not filepath:
+            return
+
+        # If the selected filepath doesn't have the .obj extension, add it
+        if not filepath.lower().endswith(".obj"):
+            filepath += ".obj"
+
+        # Export the mesh
+        #texture = self.original_image if self.original_image else None  # Use the original image as texture
+        o3d.io.write_triangle_mesh(filepath, export_mesh)
+        #export_textured_mesh(self.mesh, texture, filepath)
+        print(f"Mesh exported to {filepath}")
+
+    @pyqtSlot()
+    def create_plane_and_box_with_corners_action(self):
+        if not self.real_world_coordinates:
+            print("No reference points available.")
+            return
+
+        self.create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
+        return self
+
+
+
+    def create_or_modify_config(self):
+        # Open a file dialog to ask the user to select a config.json file
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly
+        config_filepath, _ = QFileDialog.getOpenFileName(self, "Select config.json file", "", "JSON files (*.json);;All Files (*)", options=options)
+
+        # If the user selected a file, load it
+        if config_filepath:
+            with open(config_filepath, "r") as file:
+                self.config_data = json.load(file)
+            print(f"Loaded config from {config_filepath}")
+
+
+    def config_file_exists(self):
+        try:
+            with open(self.config_file, "r") as file:
+                return True
+        except FileNotFoundError:
+            return False
+
+    def on_image_click(self, x, y):
+        if hasattr(self, 'editing_uv_for_row') and self.editing_uv_for_row is not None:
+            self.image_coordinates[self.editing_uv_for_row] = (x, y)
+            self.table.setItem(self.editing_uv_for_row, 1, QTableWidgetItem(f"{x},{y}"))
+            delattr(self, 'editing_uv_for_row')
+
+            self.update_reference_and_corner_points_on_canvas()
+        else:
+            # Store clicked image coordinates
+            self.image_coordinates.append((x, y))
+
+            # Prompt user for real-world coordinates
+            coords, ok = QInputDialog.getText(self, "Input", "Enter real-world coordinates (x, y, z):")
+
+            if ok and coords:
+                coords_list = coords.split(',')
+                if len(coords_list) != 3:
+                    print("Invalid coordinates.")
+                    return
+                rw_x, rw_y, rw_z = map(float, coords_list)
+                self.real_world_coordinates.append((rw_x, rw_y, rw_z))
+
+                # Draw a point on the image where the user clicked
+                draw = ImageDraw.Draw(self.image)
+                draw.ellipse([(x-3, y-3), (x+3, y+3)], fill='red')
+
+                # Update the image
+                qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
+                pixmap = QPixmap.fromImage(qim)
+                self.scene.clear()
+                self.scene.addPixmap(pixmap)
+                self.view.setScene(self.scene)
+
+                # Add to the reference table
+                row_position = self.table.rowCount()
+                self.table.insertRow(row_position)
+                self.table.setItem(row_position, 0, QTableWidgetItem(f"{x},{y}"))
+                self.table.setItem(row_position, 1, QTableWidgetItem(f"{rw_x},{rw_y},{rw_z}"))
+
+                self.update_reference_and_corner_points_on_canvas()
+
+    def ask_for_image_file(self):
+        options = QFileDialog.Options()
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select an Image", "", "JPEG files (*.jpg;*.jpeg);;PNG files (*.png);;All Files (*)", options=options)
+        return filepath
+
+    @pyqtSlot()
+    def load_image(self):
+        ## developer setup
+        self.image_path = self.ask_for_image_file()
+        #self.image_path = "C:/Users/tronc/Nextcloud/Uruk/WES_paleoenvi/URUK_ERT/Uruk_2023_03_18_Profile_11_SN_Schlumberger_cut.jpeg"
+        if not self.image_path:
+            return
+
+        self.image = Image.open(self.image_path).convert('RGBA')
+        self.original_image = self.image.copy()
+
+        # Update label
+        self.image_path_label.setText(f"Loaded Image: {self.image_path}")
+
+        # Display image
+        qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(qim)
+        self.scene.clear()
+        self.scene.addPixmap(pixmap)
+        self.view.setScene(self.scene)
+    
+    def on_table_cell_double_clicked(self, row, column):
+        if column == 1:  # Assuming u,v is column 1
+            self.editing_uv_for_row = row  # Create this attribute in __init__
+            self.view.scene().removeItem(self.image_coordinates[row])  # Assuming you store QGraphicsItem for each point
+
+    def on_table_cell_changed(self, row, column):
+        value = self.table.item(row, column).text()
+
+        # If it's the name column, skip processing
+        if column == 0:
+            return
+
+        # If it's the image_coordinates column
+        if column == 1:
+            try:
+                x, y = map(int, value.split(','))
+                self.image_coordinates[row] = (x, y)
+            except ValueError:
+                # Handle invalid values (either by logging, showing a message, or setting a default value)
+                pass
+
+        # If it's the real_world_coordinates column
+        if column == 2:
+            try:
+                x, y, z = map(float, value.split(','))
+                self.real_world_coordinates[row] = (x, y, z)
+            except ValueError:
+                # Handle invalid values (either by logging, showing a message, or setting a default value)
+                pass
+
+        self.update_reference_and_corner_points_on_canvas()
+
+    @pyqtSlot()
+    def save_reference_points(self):
+        if not self.image_coordinates or not self.real_world_coordinates:
+            print("No reference points to save.")
+            return
+
+        # Preparing the data to be saved
+        data = {
+            'image_coordinates': self.image_coordinates,
+            'real_world_coordinates': self.real_world_coordinates
+        }
+
+        # Propose a default filename as the input image name with .json extension
+        default_filename = self.image_path.rsplit('.', 1)[0] + '.json'
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Reference Points", default_filename, "JSON files (*.json);;All Files (*)")
+
+        if filepath:
+            with open(filepath, 'w') as file:
+                json.dump(data, file)
+            print(f"Reference points saved to {filepath}")
+
+
+
+
+    @pyqtSlot()
+    def reset_image(self):
+        self.image = self.original_image.copy()
+        self.image_coordinates = []
+        self.real_world_coordinates = []
+
+        # Display the original image
+        qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(qim)
+        self.scene.clear()
+        self.scene.addPixmap(pixmap)
+        self.view.setScene(self.scene)
+
+    @pyqtSlot()
+    def create_textured_mesh(self):
+        if not self.real_world_coordinates:
+            print("No reference points available.")
+            return
+
+        # 1. Call create_plane_and_box_with_corners to get the point cloud
+        box_pcd_utm, box = create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
+        #box_pcd_utm.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=100, max_nn=10))
+        hull, _ =box_pcd_utm.compute_convex_hull(joggle_inputs=True)
+        #o3d.visualization.draw_geometries([box_pcd_utm, hull ], mesh_show_wireframe=True, point_show_normal=True)
+        print("Number of points:", len(hull.vertices))
+        print("Number of triangles:", len(hull.triangles))
+
+        # 2. Create a triangle mesh using the Poisson reconstruction method
+        depth = 8  # You can adjust these parameters based on your requirements
+        scale = 4
+        mesh = hull
+
+
+        # Check if the mesh is valid
+        if not mesh.vertices:
+            print("Mesh generation failed. Please ensure there are enough reference points and they are well-distributed.")
+            return
+
+        print("Number of vertices:", len(mesh.vertices))
+        
+
+        #self.mesh = mesh
+        # Visualize the mesh
+        mesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+        mesh.compute_vertex_normals()
+        mesh.compute_triangle_normals()
+        mesh.compute_uvatlas()
+        #size = 512, gutter = 1.0, max_stretch = 0.1666666716337204, parallel_partitions  = 1, nthreads  = 0
+        # Generate UV coordinates from image_coordinates
+        uv_coordinates = np.array(self.image_coordinates, dtype=np.float64)
+        uv_coordinates[:, 0] /= float(self.image.width)   # Normalize U coordinates
+        uv_coordinates[:, 1] = 1.0 - uv_coordinates[:, 1] / float(self.image.height)  # Normalize V coordinates and flip vertically
+        
+        # Assign UV coordinates to the mesh
+        mesh.triangle_uvs = o3d.utility.Vector2dVector(uv_coordinates)
+        
+        # Read the image as a texture
+        texture = o3d.io.read_image(self.image_path)
+        
+        # Assign texture to the mesh
+        mesh.textures = [texture]
+        o3d.visualization.draw_geometries([mesh, box_pcd_utm], mesh_show_wireframe=True, point_show_normal=True)
+ 
+    
+    def view_in_3d(self):
+        # Create a PointCloud object from the reference points
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.real_world_coordinates)
+
+        # Check if the PointCloud has normals, if not compute them
+        if not pcd.has_normals():
+            pcd.estimate_normals()
+
+        # Visualization objects
+        vis_objects = [pcd]
+
+        # If a mesh exists, add it to the visualization
+        if hasattr(self, 'mesh') and self.mesh.vertices:
+            vis_objects.append(self.mesh)
+
+        o3d.visualization.draw_geometries(vis_objects)
+    
+
+
     def create_plane_and_box_with_corners(self, image_points, ref_points, image_path, image):
         ref_points = np.array(ref_points)
         image_points = np.array(image_points)
@@ -465,328 +937,6 @@ class GeoReferencer(QMainWindow):
         
         return box_pcd_utm, box_mesh
 
-    @pyqtSlot()
-    def export_mesh(self):
-        if self.config_data:
-            if self.config_data['translation_on_export']:
-                export_mesh = copy.deepcopy(self.mesh)
-                export_mesh.translate(self.config_data['translation_on_export'])
-                print(f"Mesh translated to {export_mesh.get_center()}.")
-        # Check if mesh exists
-        if not hasattr(self, 'mesh') or not self.mesh.vertices:
-            print("No mesh available for export.")
-            return
-
-        # Open a file dialog for the user to select a save location
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Mesh", "", "OBJ files (*.obj);;All Files (*)")
-        if not filepath:
-            return
-
-        # If the selected filepath doesn't have the .obj extension, add it
-        if not filepath.lower().endswith(".obj"):
-            filepath += ".obj"
-
-        # Export the mesh
-        #texture = self.original_image if self.original_image else None  # Use the original image as texture
-        o3d.io.write_triangle_mesh(filepath, export_mesh)
-        #export_textured_mesh(self.mesh, texture, filepath)
-        print(f"Mesh exported to {filepath}")
-
-    @pyqtSlot()
-    def create_plane_and_box_with_corners_action(self):
-        if not self.real_world_coordinates:
-            print("No reference points available.")
-            return
-
-        self.create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
-        return self
-
-
-
-    def create_or_modify_config(self):
-        # Open a file dialog to ask the user to select a config.json file
-        options = QFileDialog.Options()
-        options |= QFileDialog.ReadOnly
-        config_filepath, _ = QFileDialog.getOpenFileName(self, "Select config.json file", "", "JSON files (*.json);;All Files (*)", options=options)
-
-        # If the user selected a file, load it
-        if config_filepath:
-            with open(config_filepath, "r") as file:
-                self.config_data = json.load(file)
-            print(f"Loaded config from {config_filepath}")
-
-
-    def config_file_exists(self):
-        try:
-            with open(self.config_file, "r") as file:
-                return True
-        except FileNotFoundError:
-            return False
-
-    def on_image_click(self, x, y):
-        if hasattr(self, 'editing_uv_for_row') and self.editing_uv_for_row is not None:
-            self.image_coordinates[self.editing_uv_for_row] = (x, y)
-            self.table.setItem(self.editing_uv_for_row, 1, QTableWidgetItem(f"{x},{y}"))
-            delattr(self, 'editing_uv_for_row')
-
-            self.update_reference_and_corner_points_on_canvas()
-        else:
-            # Store clicked image coordinates
-            self.image_coordinates.append((x, y))
-
-            # Prompt user for real-world coordinates
-            coords, ok = QInputDialog.getText(self, "Input", "Enter real-world coordinates (x, y, z):")
-
-            if ok and coords:
-                coords_list = coords.split(',')
-                if len(coords_list) != 3:
-                    print("Invalid coordinates.")
-                    return
-                rw_x, rw_y, rw_z = map(float, coords_list)
-                self.real_world_coordinates.append((rw_x, rw_y, rw_z))
-
-                # Draw a point on the image where the user clicked
-                draw = ImageDraw.Draw(self.image)
-                draw.ellipse([(x-3, y-3), (x+3, y+3)], fill='red')
-
-                # Update the image
-                qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
-                pixmap = QPixmap.fromImage(qim)
-                self.scene.clear()
-                self.scene.addPixmap(pixmap)
-                self.view.setScene(self.scene)
-
-                # Add to the reference table
-                row_position = self.table.rowCount()
-                self.table.insertRow(row_position)
-                self.table.setItem(row_position, 0, QTableWidgetItem(f"{x},{y}"))
-                self.table.setItem(row_position, 1, QTableWidgetItem(f"{rw_x},{rw_y},{rw_z}"))
-
-                self.update_reference_and_corner_points_on_canvas()
-
-    def ask_for_image_file(self):
-        options = QFileDialog.Options()
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select an Image", "", "JPEG files (*.jpg;*.jpeg);;PNG files (*.png);;All Files (*)", options=options)
-        return filepath
-
-    @pyqtSlot()
-    def load_image(self):
-        ## developer setup
-        #self.image_path = self.ask_for_image_file()
-        self.image_path = "C:/Users/tronc/Nextcloud/Uruk/WES_paleoenvi/URUK_ERT/Uruk_2023_03_18_Profile_11_SN_Schlumberger_cut.jpeg"
-        if not self.image_path:
-            return
-
-        self.image = Image.open(self.image_path).convert('RGBA')
-        self.original_image = self.image.copy()
-
-        # Update label
-        self.image_path_label.setText(f"Loaded Image: {self.image_path}")
-
-        # Display image
-        qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
-        pixmap = QPixmap.fromImage(qim)
-        self.scene.clear()
-        self.scene.addPixmap(pixmap)
-        self.view.setScene(self.scene)
-    
-    def on_table_cell_double_clicked(self, row, column):
-        if column == 1:  # Assuming u,v is column 1
-            self.editing_uv_for_row = row  # Create this attribute in __init__
-            self.view.scene().removeItem(self.image_coordinates[row])  # Assuming you store QGraphicsItem for each point
-
-    def on_table_cell_changed(self, row, column):
-        value = self.table.item(row, column).text()
-
-        # If it's the name column, skip processing
-        if column == 0:
-            return
-
-        # If it's the image_coordinates column
-        if column == 1:
-            try:
-                x, y = map(int, value.split(','))
-                self.image_coordinates[row] = (x, y)
-            except ValueError:
-                # Handle invalid values (either by logging, showing a message, or setting a default value)
-                pass
-
-        # If it's the real_world_coordinates column
-        if column == 2:
-            try:
-                x, y, z = map(float, value.split(','))
-                self.real_world_coordinates[row] = (x, y, z)
-            except ValueError:
-                # Handle invalid values (either by logging, showing a message, or setting a default value)
-                pass
-
-        self.update_reference_and_corner_points_on_canvas()
-
-    @pyqtSlot()
-    def save_reference_points(self):
-        if not self.image_coordinates or not self.real_world_coordinates:
-            print("No reference points to save.")
-            return
-
-        # Preparing the data to be saved
-        data = {
-            'image_coordinates': self.image_coordinates,
-            'real_world_coordinates': self.real_world_coordinates
-        }
-
-        # Propose a default filename as the input image name with .json extension
-        default_filename = self.image_path.rsplit('.', 1)[0] + '.json'
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Reference Points", default_filename, "JSON files (*.json);;All Files (*)")
-
-        if filepath:
-            with open(filepath, 'w') as file:
-                json.dump(data, file)
-            print(f"Reference points saved to {filepath}")
-
-    @pyqtSlot()
-    def load_reference_points(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select a JSON or CSV file", "", "JSON files (*.json);;CSV files (*.csv);;All Files (*)")
-
-        if filepath.endswith(".json"):
-            with open(filepath, 'r') as file:
-                data = json.load(file)
-            self.refpointnames = data['name']
-            self.image_coordinates = data['image_coordinates']
-            self.real_world_coordinates = data['real_world_coordinates']
-
-        elif filepath.endswith(".csv"):
-            import csv
-            with open(filepath, 'r') as file:
-                reader = csv.reader(file)
-                csv_data = list(reader)[:21]  # First 20 rows + header
-
-            dialog = CSVStructureDialog(csv_data)
-            result = dialog.exec_()
-
-            if result == QDialog.Accepted:
-                self.refpointnames = []
-                self.image_coordinates = []
-                self.real_world_coordinates = []
-                
-                for row_data in csv_data[1:]:
-                    name = row_data[dialog.mapping["name"]] if "name" in dialog.mapping else ""
-                    u, v = (row_data[dialog.mapping["u"]], row_data[dialog.mapping["v"]]) if "u" in dialog.mapping and "v" in dialog.mapping else (None, None)
-                    x, y, z = (row_data[dialog.mapping["x"]], row_data[dialog.mapping["y"]], row_data[dialog.mapping["z"]]) if all(key in dialog.mapping for key in ["x", "y", "z"]) else (None, None, None)
-
-                    self.refpointnames.append(name)
-                    self.image_coordinates.append((u, v))
-                    self.real_world_coordinates.append((x, y, z))
-
-        # Determine the number of rows based on the longest list
-        num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
-        self.table.setRowCount(num_rows)
-
-        # Populate the table with the data from the lists
-        for i in range(num_rows):
-            if i < len(self.refpointnames):
-                self.table.setItem(i, 0, QTableWidgetItem(self.refpointnames[i]))
-            if i < len(self.image_coordinates):
-                u, v = self.image_coordinates[i]
-                self.table.setItem(i, 1, QTableWidgetItem(f"{u},{v}"))
-            if i < len(self.real_world_coordinates):
-                x, y, z = self.real_world_coordinates[i]
-                self.table.setItem(i, 2, QTableWidgetItem(f"{x},{y},{z}"))
-
-        self.update_reference_and_corner_points_on_canvas()
-
-    @pyqtSlot()
-    def reset_image(self):
-        self.image = self.original_image.copy()
-        self.image_coordinates = []
-        self.real_world_coordinates = []
-
-        # Display the original image
-        qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
-        pixmap = QPixmap.fromImage(qim)
-        self.scene.clear()
-        self.scene.addPixmap(pixmap)
-        self.view.setScene(self.scene)
-
-    @pyqtSlot()
-    def create_textured_mesh(self):
-        if not self.real_world_coordinates:
-            print("No reference points available.")
-            return
-
-        # 1. Call create_plane_and_box_with_corners to get the point cloud
-        box_pcd_utm, box = create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
-        #box_pcd_utm.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=100, max_nn=10))
-        hull, _ =box_pcd_utm.compute_convex_hull(joggle_inputs=True)
-        #o3d.visualization.draw_geometries([box_pcd_utm, hull ], mesh_show_wireframe=True, point_show_normal=True)
-        print("Number of points:", len(hull.vertices))
-        print("Number of triangles:", len(hull.triangles))
-
-        # 2. Create a triangle mesh using the Poisson reconstruction method
-        depth = 8  # You can adjust these parameters based on your requirements
-        scale = 4
-        #mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(depth=8)
-        #radii = [10, 20, 30, 40]
-        #mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
-            #box_pcd_utm, o3d.utility.DoubleVector(radii))
-        #mesh.compute_vertex_normals()
-        #print('Box points ',np.asarray(box.get_box_points()))
-        #boxptcloud = o3d.geometry.PointCloud()
-        #boxptcloud.points = o3d.utility.Vector3dVector(np.asarray(box.get_box_points()))
-        #tetra_mesh, pt_map = o3d.geometry.TetraMesh.create_from_point_cloud(box_pcd_utm)
-        #mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(box_pcd_utm, 0.6)
-       # mesh.compute_vertex_normals()
-        mesh = hull
-
-
-        # Check if the mesh is valid
-        if not mesh.vertices:
-            print("Mesh generation failed. Please ensure there are enough reference points and they are well-distributed.")
-            return
-
-        print("Number of vertices:", len(mesh.vertices))
-        
-
-        #self.mesh = mesh
-        # Visualize the mesh
-        mesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
-        mesh.compute_vertex_normals()
-        mesh.compute_triangle_normals()
-        mesh.compute_uvatlas()
-        #size = 512, gutter = 1.0, max_stretch = 0.1666666716337204, parallel_partitions  = 1, nthreads  = 0
-        # Generate UV coordinates from image_coordinates
-        uv_coordinates = np.array(self.image_coordinates, dtype=np.float64)
-        uv_coordinates[:, 0] /= float(self.image.width)   # Normalize U coordinates
-        uv_coordinates[:, 1] = 1.0 - uv_coordinates[:, 1] / float(self.image.height)  # Normalize V coordinates and flip vertically
-        
-        # Assign UV coordinates to the mesh
-        mesh.triangle_uvs = o3d.utility.Vector2dVector(uv_coordinates)
-        
-        # Read the image as a texture
-        texture = o3d.io.read_image(self.image_path)
-        
-        # Assign texture to the mesh
-        mesh.textures = [texture]
-        o3d.visualization.draw_geometries([mesh, box_pcd_utm], mesh_show_wireframe=True, point_show_normal=True)
- 
-    
-    def view_in_3d(self):
-        # Create a PointCloud object from the reference points
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.real_world_coordinates)
-
-        # Check if the PointCloud has normals, if not compute them
-        if not pcd.has_normals():
-            pcd.estimate_normals()
-
-        # Visualization objects
-        vis_objects = [pcd]
-
-        # If a mesh exists, add it to the visualization
-        if hasattr(self, 'mesh') and self.mesh.vertices:
-            vis_objects.append(self.mesh)
-
-        o3d.visualization.draw_geometries(vis_objects)
-    
     def update_reference_and_corner_points_on_canvas(self):
         """
         Update the reference and corner points on the canvas.
@@ -834,50 +984,3 @@ class GeoReferencer(QMainWindow):
             rmse = np.sqrt(np.sum((np.array(trans) - np.array(real))**2))
             self.table.setItem(i, 2, QTableWidgetItem(f"{rmse:.4f}"))
         
-
-class CSVStructureDialog(QDialog):
-    def __init__(self, csv_data):
-        super().__init__()
-        
-        self.csv_data = csv_data
-        self.mapping = {}
-
-        layout = QVBoxLayout(self)
-
-        # Create the table
-        self.table = QTableWidget(self)
-        self.table.setColumnCount(len(csv_data[0]))
-        self.table.setHorizontalHeaderLabels(csv_data[0])  # Using the first row as headers
-        
-        for row_data in csv_data[1:]:  # Skip the header
-            row_position = self.table.rowCount()
-            self.table.insertRow(row_position)
-            for col, item in enumerate(row_data):
-                self.table.setItem(row_position, col, QTableWidgetItem(item))
-        
-        layout.addWidget(self.table)
-
-        # Dropdown menu for mapping columns
-        mapping_layout = QHBoxLayout()
-        for col in range(self.table.columnCount()):
-            combo = QComboBox(self)
-            combo.addItems(["-", "u", "v", "x", "y", "z", "name"])  # Added "name" here
-            combo.currentIndexChanged.connect(lambda idx, col=col, combo=combo: self.update_mapping(col, combo))
-            combo.setFixedWidth(self.table.columnWidth(col))  # Set the width of the combo box to match the column width
-            mapping_layout.addWidget(combo)
-        layout.addLayout(mapping_layout)
-
-        # Import button
-        btn_import = QPushButton("Import Ref Points", self)
-        btn_import.clicked.connect(self.on_import)
-        layout.addWidget(btn_import)
-
-        self.setLayout(layout)
-
-    def update_mapping(self, col, combo):
-        value = combo.currentText()
-        if value != "-":
-            self.mapping[value] = col
-
-    def on_import(self):
-        self.accept()
