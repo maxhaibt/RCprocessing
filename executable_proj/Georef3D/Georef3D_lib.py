@@ -143,7 +143,7 @@ class CustomGraphicsView(QGraphicsView):
             self._pan_start_x = event.x()
             self._pan_start_y = event.y()
             # Start the timer when left button is pressed
-            self.click_timer.start(300)  # 300 ms 
+            self.click_timer.start(200)  # 300 ms 
 
         super().mousePressEvent(event)
 
@@ -239,7 +239,7 @@ class CSVStructureDialog(QDialog):
         self.checkbox_states = []  # Store checkbox states
 
         # Add checkboxes in the additional column (column 0) and mapping selection in the additional row (row 0)
-        for row, row_data in enumerate(csv_data[1 + self.skip_rows:], start=1):  # Skip the header and skipped rows
+        for row, row_data in enumerate(csv_data[1 + self.skip_rows:], start=0):  # Skip the header and skipped rows
             # Add a checkbox for row selection
             checkbox = QCheckBox(self)
             self.row_checkboxes.append(checkbox)
@@ -475,24 +475,14 @@ class GeoReferencer(QMainWindow):
             import csv
             with open(filepath, 'r') as file:
                 reader = csv.reader(file)
-                csv_data = list(reader)[:21]  # First 20 rows + header
+                csv_data = list(reader) 
 
             self.dialog = CSVStructureDialog(csv_data)
 
             # Connect the signal to the slot here
             self.dialog.data_imported.connect(self.handle_imported_data)
-
-
             result = self.dialog.exec_()
             print(self.refpointnames)
-            
-
-            #if result == QDialog.Accepted:
-                #self.refpointnames = []
-                #self.image_coordinates = []
-                #self.real_world_coordinates = []
-                
-
 
         # Determine the number of rows based on the longest list
         num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
@@ -605,8 +595,8 @@ class GeoReferencer(QMainWindow):
                 # Add to the reference table
                 row_position = self.table.rowCount()
                 self.table.insertRow(row_position)
-                self.table.setItem(row_position, 0, QTableWidgetItem(f"{x},{y}"))
-                self.table.setItem(row_position, 1, QTableWidgetItem(f"{rw_x},{rw_y},{rw_z}"))
+                self.table.setItem(row_position, 1, QTableWidgetItem(f"{x},{y}"))
+                self.table.setItem(row_position, 2, QTableWidgetItem(f"{rw_x},{rw_y},{rw_z}"))
 
                 self.update_reference_and_corner_points_on_canvas()
 
@@ -856,10 +846,15 @@ class GeoReferencer(QMainWindow):
         box_mesh.compute_triangle_normals(normalized=True)
         face_normals = np.asarray(box_mesh.triangle_normals)
 
-        # Identify the two faces that are most parallel to the XY plane
+        # Identify the two faces that are aligned with the normal
         dot_products = np.dot(face_normals, normal)
         sorted_indices = np.argsort(dot_products)
         target_face_indices = sorted_indices[-2:]  # Get the last two indices (highest dot products)
+
+        # Identify the two faces that are opposite with the normal
+        dot_products = np.dot(face_normals, -1 * normal)
+        sorted_indices = np.argsort(dot_products)
+        opposite_face_indices = sorted_indices[-2:]  # Get the last two indices (highest dot products)
 
         print(f"Target face indices: {target_face_indices}")
 
@@ -871,10 +866,10 @@ class GeoReferencer(QMainWindow):
 
 
 
-
+        print(f"Target face indices: {np.append(target_face_indices,opposite_face_indices)}")
         # Gather all unique vertices from the target faces
         unique_vertices = set()
-        for target_face_idx in target_face_indices:
+        for target_face_idx in np.append(target_face_indices,opposite_face_indices):
             face_vertices = np.asarray(box_mesh.triangles)[target_face_idx]
             unique_vertices.update(face_vertices)
 
@@ -982,5 +977,5 @@ class GeoReferencer(QMainWindow):
         # Calculate RMSE values for each point and populate the table
         for i, (trans, real) in enumerate(zip(transformed_real_coords, self.real_world_coordinates)):
             rmse = np.sqrt(np.sum((np.array(trans) - np.array(real))**2))
-            self.table.setItem(i, 2, QTableWidgetItem(f"{rmse:.4f}"))
+            self.table.setItem(i, 3, QTableWidgetItem(f"{rmse:.4f}"))
         
