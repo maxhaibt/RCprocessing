@@ -8,7 +8,7 @@ import itertools
 import pandas as pd
 import exifread
 import pathconfig
-from datetime import datetime 
+from datetime import datetime
 import geopandas as gpd
 from shapely.geometry import box, Polygon
 from shapely.affinity import rotate
@@ -16,13 +16,93 @@ import xml.etree.ElementTree as ET
 import re
 import math
 import matplotlib.pyplot as plt
+from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
 #import pickle
 
 
+import os
+import exifread
+from datetime import datetime, timedelta
+from shutil import move
 
+
+def locateColorPatches():
+    # Load the image
+    img = io.imread('image.jpg')
+
+    # Convert the image to grayscale
+    gray = color.rgb2gray(img)
+
+    # Detect edges using the Canny algorithm
+    edges = feature.canny(gray)
+
+    # Find contours in the image
+    contours = feature.corner_peaks(feature.corner_harris(edges), min_distance=5)
+
+    # Sort the contours by x and y coordinates
+    contours = sorted(contours, key=lambda x: (x[0], x[1]))
+
+    # Calculate the patch size
+    patch_size = int(np.mean(np.diff(contours[:, 0])))
+
+    # Define the patch locations
+    patch_locs = []
+    for y in range(patch_size//2, 4*patch_size, patch_size):
+        for x in range(patch_size//2, 6*patch_size, patch_size):
+            patch_locs.append((x, y))
+
+    print(patch_locs)
+
+
+
+
+def sort_image_series(folderpath):
+    # List all files in folderpath
+    files = os.listdir(folderpath)
+    # Filter only JPG and DNG files
+    files = [f for f in files if f.endswith('.JPG') or f.endswith('.dng')]
+
+    # Read image metadata using exifread
+    image_data = []
+    for f in files:
+        path = os.path.join(folderpath, f)
+        with open(path, 'rb') as file:
+            tags = exifread.process_file(file, details=False)
+            datetime_str = str(tags.get('EXIF DateTimeOriginal'))
+            datetime_obj = datetime.strptime(datetime_str, '%Y:%m:%d %H:%M:%S')
+            image_data.append({'filename': f, 'datetime': datetime_obj})
+
+    # Sort image data by datetime
+    image_data.sort(key=lambda x: x['datetime'])
+
+    # Cluster images by datetime
+    clusters = []
+    cluster_start = None
+    for data in image_data:
+        if cluster_start is None:
+            cluster_start = data['datetime']
+            clusters.append([data['filename']])
+        else:
+            time_diff = data['datetime'] - cluster_start
+            if time_diff <= timedelta(seconds=60):
+                clusters[-1].append(data['filename'])
+                cluster_start = data['datetime']
+            else:
+                cluster_start = data['datetime']
+                clusters.append([data['filename']])
+                cluster_start = data['datetime']
+
+    # Create new folders and move images into them
+    for i, cluster in enumerate(clusters):
+        new_folder = os.path.join(folderpath, f'cluster_{i+1}')
+        os.makedirs(new_folder)
+        for filename in cluster:
+            src_path = os.path.join(folderpath, filename)
+            dst_path = os.path.join(new_folder, filename)
+            shutil.move(src_path, dst_path)
 
 def loadconfigs(configpath):
     with open(configpath) as configfile:
@@ -85,7 +165,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan = {}
             scan['id']= scan_id.stem
             scan['processingstate'] = pd.DataFrame({'command': 'provide_scandf', 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': True}, index=['datetime'])
-            #pd.concat([scan['processingstate'], 
+            #pd.concat([scan['processingstate'],
             scan['scan_dir'] = Path(os.path.join(inputdirectory, scan_id))
             scan['pp3file'] = [file for file in scan['scan_dir'].rglob("*.pp3")]
             if 'constantpp3file' in config.keys() and Path(config['constantpp3file']).is_file():
@@ -138,7 +218,7 @@ def create_scaling_matrix(sx, sy, sz):
 def create_object_coordinate_frame(x, y, z, x_length, y_length, z_length):
     # Create a coordinate frame with unit size
     coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[x, y, z])
-       
+
     return coord_frame
 
 
@@ -150,16 +230,16 @@ def tranformmatrix_to_local(rcbox):
     rotation = rcbox['transform_to_local']['rotation_matrix']
 
     print(rotation)
-    
+
     # Create a 4x4 identity matrix
     to_local_matrix = np.eye(4)
-    
+
     # Set the rotation
     to_local_matrix[:3, :3] = rotation  # Transpose of the rotation matrix
-    
+
     # Set the translation (inverse)
     to_local_matrix[:3, 3] = translation
-    
+
     return to_local_matrix
 
 def transformmatrix_to_global(rcbox):
@@ -169,13 +249,13 @@ def transformmatrix_to_global(rcbox):
 
     # Create a 4x4 identity matrix
     to_global_matrix = np.eye(4)
-    
+
     # Set the rotation
     to_global_matrix[:3, :3] = rotation.T
-    
+
     # Set the translation
     to_global_matrix[:3, 3] = -translation
-    
+
     return to_global_matrix
 
 def persistent_translate(rcbox, x, y, z):
@@ -213,7 +293,7 @@ def localspace_scale(rcbox, scale_x, scale_y, scale_z, save=True):
     # Transform the rcbox to the local space
     to_local_matrix = tranformmatrix_to_local(rcbox)
     localgeom = rcbox['geometry'].transform(to_local_matrix)
-    
+
     # Create a scaling matrix
     S = np.array([
         [scale_x, 0, 0, 0],
@@ -222,20 +302,20 @@ def localspace_scale(rcbox, scale_x, scale_y, scale_z, save=True):
         [0, 0, 0, 1]
     ])
     print('S: ', S)
-    
+
     # Apply the scaling in local space
     locally_scaled = localgeom.transform(S)
-    
+
     # Transform the locally scaled geometry of the rcbox back to the global space
     to_global_matrix = transformmatrix_to_global(rcbox)
-    
+
     # Apply the global transformation to the locally scaled geometry
     rcbox['geometry'] = locally_scaled.transform(to_global_matrix)
-    
+
     # Update the scaling matrix in the rcbox's transform_to_local
     if save:
         rcbox['transform_to_local']['scale_matrix'] = rcbox['transform_to_local']['scale_matrix'] @ S
-    
+
     return rcbox
 
 def read_rcbox(rcbox_path):
@@ -248,7 +328,7 @@ def read_rcbox(rcbox_path):
         depth_RC, width_RC, height_RC = [float(val) for val in root.find('widthHeightDepth').text.split()]
         x, y, z = [float(val) for val in root.find('CentreEuclid/centre').text.split()]
         yaw, pitch, roll = [float(val) for val in root.find('yawPitchRoll').text.split()]
-        
+
         global_coord_system = root.get('globalCoordinateSystem')
         global_coord_system_name = root.get('globalCoordinateSystemName')
 
@@ -256,14 +336,14 @@ def read_rcbox(rcbox_path):
         #WARNING open3D width,height,depth are switched compared to reality capture
         #width in open3d is x-directional length is depth in RC
         #height in open3d is y-directional length is width in RC
-        #depth in open3d is  z-directional length is height in RC   
+        #depth in open3d is  z-directional length is height in RC
         cube = o3d.geometry.TriangleMesh.create_box(width=depth_RC, height=width_RC, depth=height_RC)
         cube = cube.translate([0,0,0], relative=False)
         rcbox = {
             'name': rcbox_path.stem,
             'geometry': cube,
-            'transform_to_local': {'translation_matrix': np.array([0, 0, 0]), 
-                                   'rotation_matrix': np.identity(3), 
+            'transform_to_local': {'translation_matrix': np.array([0, 0, 0]),
+                                   'rotation_matrix': np.identity(3),
                                    'scale_matrix': np.array([
                                         [1, 0, 0, 0],
                                         [0, 1, 0, 0],
@@ -275,11 +355,11 @@ def read_rcbox(rcbox_path):
 
         # apply the global transformations from the rcbox file
         rcbox = persistent_translate(rcbox, x, y, z)
-        rcbox = localspace_rotation(rcbox, yaw, pitch, roll) 
+        rcbox = localspace_rotation(rcbox, yaw, pitch, roll)
         rcbox['globalCoordinateSystem'] = global_coord_system
-        rcbox['globalCoordinateSystemName'] = global_coord_system_name  
+        rcbox['globalCoordinateSystemName'] = global_coord_system_name
         print(rcbox)
-        
+
     return rcbox
 
 
@@ -288,18 +368,18 @@ def rotation_matrix_to_euler_angles(R):
     yaw = math.atan2(R[1, 0], R[0, 0])
     pitch = math.atan2(-R[2, 0], math.sqrt(R[2, 1]**2 + R[2, 2]**2))
     roll = math.atan2(R[2, 1], R[2, 2])
-    
+
     return [yaw, pitch, roll]
 
 def write_rcbox(rcbox):
     # Extract the dimensions from the geometry
     bounds = rcbox['geometry'].get_axis_aligned_bounding_box().get_extent()
     depth, width, height = bounds
-    
+
     # Extract the rotation matrix and convert it to Euler angles
     rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
     yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
-    
+
     # Convert the Euler angles to degrees
     yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
 
@@ -311,21 +391,21 @@ def write_rcbox(rcbox):
         'isGeoreferenced': "1",
         'isLatLon': "0"
     })
-    
+
     # Add the yawPitchRoll element
     ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
-    
+
     # Add the widthHeightDepth element
     ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
-    
+
     # Add the Header element (keeping it same as the provided XML)
     ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
-    
+
     # Add the CentreEuclid element
     centre_euclid = ET.SubElement(root, "CentreEuclid")
     x, y, z = rcbox['geometry'].get_center()
     ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
-    
+
     # Add the Residual element (keeping it same as the provided XML)
     ET.SubElement(root, "Residual", {
         'R': "1 0 0 0 1 0 0 0 1",
@@ -333,11 +413,11 @@ def write_rcbox(rcbox):
         's': "1",
         'ownerId': "{2B36705F-74C9-4270-BED3-074F279D427B}"
     })
-    
+
     # Serialize the XML tree to a file
     tree = ET.ElementTree(root)
     return tree
-    
+
 def generate_rcortho(rcbox, width, height, colorType, modelName, boxSideCornerIndices):
     # Generate the root XML element for the rcortho file
     attributes = {
@@ -354,20 +434,20 @@ def generate_rcortho(rcbox, width, height, colorType, modelName, boxSideCornerIn
         'projectionType': "0",
         'bShowOrthoProjection': "1"
     }
-    
+
     # Create an empty root
     root = ET.Element(None)
-    
+
     # Create OrthoProjection element and add to root
     ortho_projection = ET.SubElement(root, 'OrthoProjection', attributes)
     ET.SubElement(ortho_projection, "Header", {'magic': "5787472", 'version': "2"})
-    
+
     # Generate the rcbox XML tree and add its root to our main root
     rcbox_tree = write_rcbox(rcbox)
     root.append(rcbox_tree.getroot())
-    
+
     return root
-    
+
 
 
 def createGCPfile_forsedimentcores(scan) -> None:
@@ -376,22 +456,22 @@ def createGCPfile_forsedimentcores(scan) -> None:
 
     # Load the GeoPackage file
     gcp_startpoints_gdf = gpd.read_file(config["GCPstartpointfile"])
-    
+
     # Extract the first part of scan['id'] (e.g., URUK27)
     first_part = scan['id'].split('_')[0].replace("URUK", "URUK ").replace("Uruk", "URUK ")  # add space
-    
+
     # Find the corresponding point in the GeoPackage file
     start_point = gcp_startpoints_gdf[gcp_startpoints_gdf['Name'] == first_part]
     if len(start_point) == 0:
         raise ValueError(f"No point found in GeoPackage file with name '{first_part}'")
-    
+
     # Extract the XYZ coordinates of the start point
     start_point_coords = start_point.iloc[0]['geometry'].coords[0]
-    
+
     # Extract the second part of scan['id'] (e.g., 0to1m) and determine the Z translation
     second_part = scan['id'].split('_')[1]
     z_translation = -int(second_part.split('to')[0])
-    
+
     # Apply the affine transformation to the GCPs
     gcps_df['X'] += start_point_coords[0]
     gcps_df['Y'] += start_point_coords[1]
@@ -401,12 +481,12 @@ def createGCPfile_forsedimentcores(scan) -> None:
     # Apply the affine transformation to the rcbox
     rcbox = persistent_translate(rcbox, start_point_coords[0], start_point_coords[1], start_point_coords[2] + z_translation)
     #print(rcbox['geometry'].get_center())
-    
+
     # Write the modified GCPs to a new CSV file
     output_path = Path(scan['scan_dir']) / "modified_rcgcps.csv"
     gcps_df.to_csv(output_path, index=False)
     scan['gcpsfile'] = [file for file in scan['scan_dir'].rglob("*rcgcps.csv")]
-    
+
 
     # Write the modified XML content to a new rcbox-file
     scan['rcbox'] = rcbox
@@ -419,17 +499,17 @@ def createGCPfile_forsedimentcores(scan) -> None:
 def loadCameraPoses(scan):
     print(scan['camregistrationpath'])
     camera_poses_df = pd.read_csv(scan['camregistrationpath'][0], skiprows=1)
-    
+
     # Extract the filename from the 'name' column
     camera_poses_df['filename'] = camera_poses_df['#name'].apply(lambda x: Path(x).name)
-    
+
     # Before merging, check for duplicate columns (excluding 'filename') and drop them from scan['imagedf']
     duplicate_columns = camera_poses_df.columns.intersection(scan['imagedf'].columns)
     duplicate_columns = duplicate_columns.drop('filename') if 'filename' in duplicate_columns else duplicate_columns
-    
+
     if not duplicate_columns.empty:
         scan['imagedf'] = scan['imagedf'].drop(columns=duplicate_columns)
-    
+
     merged_df = pd.merge(scan['imagedf'], camera_poses_df, on='filename', how='inner')
     scan['imagedf'] = merged_df
     return scan
@@ -491,7 +571,7 @@ def importRegisteredParameters(scan, searchfilename='*camparam.csv'):
         print('No camparam.csv file found in ', scan['scan_dir'])
 
     if len(camparam_path) >= 1:
-        
+
         #create a new column 'name' in the scan['imagedf'], which is a dataframe, that contains the image stem not the Path-object contained in the column 'rawimg_path'
         scan['imagedf']['#name'] = scan['imagedf']['rawimg_path'].apply(lambda x: x.name)
         #read the csv-file as a dataframe and join it with the scan['image_df'] based on the image name. The csv-file has column's names written in the first row
@@ -581,7 +661,7 @@ def plotParametersStats(allscan):
     return resultparams
 
 
-    
+
 
 
 
@@ -595,7 +675,7 @@ def extract_timestamps(series):
         with open(series['scannerlogfile'][0], 'r') as file:
             content = file.read()
             matches = re.findall(timestamp_pattern, content)
-            
+
             for match in matches:
                 key, value = match
                 #rint(key, value)
@@ -606,20 +686,20 @@ def extract_timestamps(series):
 
 def extract_creation_datetime(series):
     creation_time_key = 'DateTimeOriginal'
-    
+
     # Open the image
     with Image.open(series['rawimg_path']) as img:
         # Get the EXIF data
         exif_data = img._getexif()
-        
+
         if exif_data:
             # Convert the EXIF tag ID to tag names
             exif = {TAGS[k]: v for k, v in exif_data.items() if k in TAGS}
-            
+
             if creation_time_key in exif:
                 # Extract the creation datetime as a string
                 creation_time_str = exif[creation_time_key]
-                
+
                 # Convert the string to a datetime object
                 creation_time = datetime.strptime(creation_time_str, '%Y:%m:%d %H:%M:%S')
                 series['creation_datetime'] = creation_time
@@ -662,13 +742,13 @@ def plot_duration_histogram(df, num_bins=120):
 ### This is more complicated then I thought.
 def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
     #print(df.columns)
-    
+
     df['shotnumber'] = np.nan
     newdf = pd.DataFrame(columns=(df.columns))
     for name, group in df.groupby('roundnumber'):
         maxi = int(len(group) / 12)
         group = group.sort_values(by='imgnumber').reset_index(drop=True)
-        for i in range(1, maxi):    
+        for i in range(1, maxi):
             #print('i: ', i)
             shotdf = pd.DataFrame(columns=(df.columns))
             # exclude from group the rows which are already in newdf
@@ -677,7 +757,7 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
             t = 0
             for index, row in groupmod.iterrows():
                 if not sorted(shotdf['cam_id'].to_list()) == sorted(config['expected_cam_ids']) :
-                    
+
                     if row['cam_id'] not in shotdf['cam_id'].to_list() :
                         if int(row['imgnumber']) > shotdf['imgnumber'].max() + 6:
                             #print('skip due to high imgnumber')
@@ -691,7 +771,7 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
                     else :
                         #print( 'skip cam_id: ', row['cam_id'])
                         t = t + 1
-                        
+
                         if t>5:
                             #print('t>5')
                             #shotdf = pd.concat([shotdf, row.to_frame().transpose()])
@@ -703,14 +783,14 @@ def add_shotnumber(df: pd.DataFrame) -> pd.DataFrame:
             newdf = pd.concat([newdf, shotdf])
             i += 1
 
-                    
-       
+
+
     return newdf
-            
 
 
-        
-    
+
+
+
 
 
     # Return the modified DataFrame with the new 'shotnumber' column
@@ -749,7 +829,7 @@ def developwithRawTherapee(imageseries, pp3filepath , outputfolderpath, inputraw
              + ' -o ' + '"' + str(outfile.as_posix()) + '"'   + config['devimage_param']+ ' -q ' +  ' -Y ' \
             + '-p ' + '"' + str(Path(pp3filepath).as_posix()) + '"' + \
              ' -c '  +  '"' + str(imageseries['rawimg_path']) +  '"' \
-             ) 
+             )
     if outfile.is_file():
         imageseries[outputdevimagepathfield]= outfile
         #print(imageseries[outputdevimagepathfield])
@@ -757,13 +837,13 @@ def developwithRawTherapee(imageseries, pp3filepath , outputfolderpath, inputraw
     return imageseries
 def makeImagelist(scan, imagelistname, imagefield='dev-img_path'):
     #takes a dataframe as input and expects imagepaths in the specified field
-    # The name of the resulting imagelist-file must be specified and will be stored in the df 
+    # The name of the resulting imagelist-file must be specified and will be stored in the df
     imagelistname = imagelistname + '.imagelist'
     imagelistpath = scan['RCoutputfolder']/ imagelistname
     #print(scan[imagefield])
     #imagelistpath.parent.mkdir(parents=True, exist_ok=True)
     if not imagelistpath.is_file() or imagelistpath.is_file() and config['overwrite_imagelist'] :
-        if imagelistpath.is_file():    
+        if imagelistpath.is_file():
             imagelistpath.unlink()
         imagelistpath.touch(exist_ok=True)
         with imagelistpath.open('a') as imagelistfile:
@@ -864,7 +944,7 @@ def executeRCCMDuseRCproject(scan, rccmdpathfield='rccmdpath', instanceName = 'd
         except subprocess.CalledProcessError as e:
             print(e.output)
             scan['processingstate']=pd.concat([scan['processingstate'], pd.DataFrame({'command': rccmdpathfield, 'datetime':datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'success': False}, index=['datetime'])])
-            return scan        
+            return scan
 def rccmdExportControlPoints(commandlist, cpmFileName):
     command = '-exportControlPointsMeasurements ' + cpmFileName
     commandlist.append(command)
@@ -912,7 +992,7 @@ def read_rcorthobox(series, rcorthofield='orthoboxfile', outfield='orthobox'):
             #print(recon_xml)
             # Read the reconstruction region box coordinates from the second xml
             reconstruction_region = ET.fromstring(recon_xml)
-            try:   
+            try:
                 x,y,z = tuple(map(float,reconstruction_region.find('CentreEuclid').attrib['centre'].split()))
             except:
                 x,y,z = tuple(map(float, reconstruction_region.find('CentreEuclid').find('centre').text.split()))
@@ -1021,8 +1101,8 @@ def write_rcorthobox(series, height, width, resolution, overlap, depth,tree, roo
     text = text.replace('<Documents>','')
     text = text.replace('</Documents>','')
     with open(series['rcorthoboxoutpath'], 'w') as output_file:
-        output_file.write(text)    
-    
+        output_file.write(text)
+
     return series
 
 def write_rcimagelist(series, sourceimagefolder, outputfolder):
@@ -1069,7 +1149,7 @@ def createTileFrame(geodf):
 
 def createBuffer(grid_df, camerabuffer):
     grid_geom = grid_df.geometry
-    grid_df['buffer'] = grid_geom.buffer(camerabuffer)  
+    grid_df['buffer'] = grid_geom.buffer(camerabuffer)
     return grid_df
 def removeEmptyCameralist(df, column, limit):
     cleandictlist = []
@@ -1093,7 +1173,7 @@ def filterCameralistFP(series):
         camdict['name'] = name
         camdictlist.append(camdict)
     dataset = pd.DataFrame(camdictlist)
-    
+
     statsdf = dataset.groupby('FP').session.agg('count').to_frame('count').reset_index()
     winner = statsdf['FP'][statsdf['count']==statsdf['count'].max()]
     #print(winner)
@@ -1114,7 +1194,7 @@ def takeoverCameralistFP(series, grid_df):
     takeoverCameralist = []
     squareswithinlist = grid_df.geometry.within(series['geometry'])
     squares = grid_df.loc[squareswithinlist]
-    for index,square in squares.iterrows():       
+    for index,square in squares.iterrows():
         takeoverCameralist = takeoverCameralist + square['bestfp_cameralist']
     series['bestfp_cameralist'] = takeoverCameralist
     return series
@@ -1132,7 +1212,7 @@ def createGrid(geodf_envelope, length, width):
     rows = list(range(int(np.floor(ymin)), int(np.ceil(ymax)), length))
     #rows.reverse()
     grid_df = gpd.GeoDataFrame()
-    for ix,x in enumerate(cols): 
+    for ix,x in enumerate(cols):
         for iy,y in enumerate(rows):
             grid={}
             grid['GridId']= str(int(ix)) + '_' + str(int(iy))
@@ -1150,8 +1230,8 @@ def geomNesting(series, grid_df):
     return series
 
 
-    
-    
+
+
 def  detect_tiepoints(groups):
     #[groups.get_group(x) for x in groups.groups]
     #print(groups['scan_id'])
@@ -1160,7 +1240,7 @@ def  detect_tiepoints(groups):
     #print(type(scan_id))
     print(scan_id[0])
     filename_imagelist = str(scan_id[0]) + '_' + str(imgnumber[0]) + '.imagelist'
-    RCimagelist_path = workingdirectory + filename_imagelist 
+    RCimagelist_path = workingdirectory + filename_imagelist
     filename_tiepoints = str(scan_id[0]) + '_' + str(imgnumber[0]) + '_tiepoints.csv'
     RCtiepoints_path = workingdirectory + filename_tiepoints
     #print(pd.unique(groups['scan_id'][0]))
@@ -1172,57 +1252,57 @@ def read_tiepoints(imagelist):
     tiepoints_all = pd.DataFrame()
     for RCtiepoints in os.listdir(workingdirectory):
         if RCtiepoints.endswith(("_tiepoints.csv")):
-            colnames=['img_path', 'tiepointid_raw', 'X', 'Y'] 
+            colnames=['img_path', 'tiepointid_raw', 'X', 'Y']
             tiepoints_df = pd.read_csv(workingdirectory + RCtiepoints, names=colnames, header=None)
             idadd = RCtiepoints.replace('_tiepoints.csv','')
             print(tiepoints_df['tiepointid_raw'])
             tiepoints_df['tiepointid'] = idadd + '_' + tiepoints_df['tiepointid_raw']
             tiepoints_all = tiepoints_all.append(tiepoints_df)
-    
-    imagetiepointlist_unfolded = pd.merge(imagelist,tiepoints_all, on ='img_path')        
+
+    imagetiepointlist_unfolded = pd.merge(imagelist,tiepoints_all, on ='img_path')
     return imagetiepointlist_unfolded
 
 def create_RCtiepoints(groups):
     scan_id = pd.unique(groups['scan_id'])
     RCtiepoints_path = workingdirectory + scan_id[0] + '_alltiepoints.csv'
     groups[['img_path','tiepointid','X','Y']].to_csv(RCtiepoints_path, header=False, index=False)
-    
-    
-        
+
+
+
 
 
 def createStartCommand(grid_df, RCpath, instanceName, messagepath, RCbaseProject, RCCMD):
-    
+
     subprocess.run('"'+ RCpath + '"' + ' -setInstanceName ' + instanceName + ' -silent ' + messagepath + ' -set "appQuitOnError=true" -load ' + RCbaseProject + ' -execRCCMD ' + RCCMD + ' -quit')
 
 
 def createTileCommand( grid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, unwrapparamspath, reprojectparams, exportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in grid_df.iterrows():
         modeloutpath = os.path.join(outputfolder, 'tile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'tile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'tile2D_' + str(row['GridId']) + '_dem.tiff')
         tilecommand = '-selectModel ' + BaseHighpolymodel + ' -selectAllImages -enableTexturingAndColoring false -enableInComponent false -deselectAllImages -importImageSelection ' + row['rcimagelistoutpath'] + ' -enableTexturingAndColoring true -enableInComponent true' + ' -deselectModelTriangles' + ' -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_highpoly' + ' -unwrap ' + unwrapparamspath + ' -calculateTexture' + ' -selectModel ' + BaseLowpolymodel + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' -unwrap ' + unwrapparamspath + ' -reprojectTexture ' + 'tile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' ' + reprojectparams + ' -selectModel ' +  'tile3D_' + str(row['GridId']) + '_lowpoly'  + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' -exportModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' ' + modeloutpath + ' ' + exportparams + ' -calculateOrthoProjection ' + row['rcorthoboxoutpath'] + ' -selectOrthoProjection ' + 'tile2D_' + str(row['GridId']) + ' -exportOrthoProjection ' + orthodiffuseoutpath + ' ' + exportorthodiffuseparams + ' -exportOrthoProjection ' + orthodemoutpath + ' ' + exportorthodemparams
         commandlist.append(tilecommand)
-    
+
     return commandlist
 
 def createMakrotileCommand( grid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, unwrapparamspath, unwrapparamspathMakrotile,  reprojectparams, exportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in grid_df.iterrows():
         modeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         #orthodiffuseoutpath = os.path.join(outputfolder, 'tile2D_' + str(row['GridId']) + '_diffuse.tiff')
         #orthodemoutpath = os.path.join(outputfolder, 'tile2D_' + str(row['GridId']) + '_dem.tiff')
-        tilecommand = '-selectModel ' + BaseHighpolymodel + ' -selectAllImages -enableTexturingAndColoring false -enableInComponent false -deselectAllImages -importImageSelection ' + row['rcimagelistoutpath'] + ' -enableTexturingAndColoring true -enableInComponent true' + ' -deselectModelTriangles' + ' -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_highpoly' + ' -unwrap ' + unwrapparamspath + ' -calculateTexture' + ' -selectModel ' + BaseLowpolymodel + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' -unwrap ' + unwrapparamspathMakrotile + ' -reprojectTexture ' + 'tile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' ' + reprojectparams + ' -selectModel ' +  'tile3D_' + str(row['GridId']) + '_lowpoly'  + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' -exportModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' ' + modeloutpath + ' ' + exportparams 
+        tilecommand = '-selectModel ' + BaseHighpolymodel + ' -selectAllImages -enableTexturingAndColoring false -enableInComponent false -deselectAllImages -importImageSelection ' + row['rcimagelistoutpath'] + ' -enableTexturingAndColoring true -enableInComponent true' + ' -deselectModelTriangles' + ' -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_highpoly' + ' -unwrap ' + unwrapparamspath + ' -calculateTexture' + ' -selectModel ' + BaseLowpolymodel + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' -unwrap ' + unwrapparamspathMakrotile + ' -reprojectTexture ' + 'tile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'tile3D_' + str(row['GridId']) + '_lowpoly' + ' ' + reprojectparams + ' -selectModel ' +  'tile3D_' + str(row['GridId']) + '_lowpoly'  + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' -exportModel ' + 'tile3D_' + str(row['GridId']) + '_lowpolyTight' + ' ' + modeloutpath + ' ' + exportparams
         commandlist.append(tilecommand)
-    
+
     return commandlist
 
 def createMakroAndDetailCommand( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
@@ -1239,8 +1319,8 @@ def createMakroAndDetailCommand( makrogrid_df, RCpath, instanceName, BaseHighpol
             ' -selectModel ' + BaseMakroLowpolymodel + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_lowpoly' + \
             ' -unwrap ' + makrounwrapparamspath + ' -reprojectTexture ' + 'makrotile3D_' + str(row['GridId']) + '_mikrotileres ' +         'makrotile3D_' + str(row['GridId']) + '_lowpoly' + ' ' + makroreprojectparams + \
             ' -selectModel ' +  'makrotile3D_' + str(row['GridId']) + '_lowpoly'  + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_lowpolyTight' + \
-            ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_lowpolyTight' + ' ' + makromodeloutpath + ' ' + makroexportparams 
-        
+            ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_lowpolyTight' + ' ' + makromodeloutpath + ' ' + makroexportparams
+
         commandlist.append(makrotilecommand)
         mikrogrid = row['mikrogrid']
         #print(type(mikrogrid))
@@ -1258,13 +1338,13 @@ def createMakroAndDetailCommand( makrogrid_df, RCpath, instanceName, BaseHighpol
 
 
             commandlist.append(mikrotilecommand)
-    
+
     return commandlist
 
 
 def createPreMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
@@ -1277,36 +1357,36 @@ def createPreMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseL
             ' -selectModel ' + BaseLowpolymodel + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_mikrotileres' + \
             ' -unwrap ' + unwrapparamspath + ' -reprojectTexture ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly ' + 'makrotile3D_' + str(row['GridId']) + '_mikrotileres' + ' ' + makroreprojectparams + \
             ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_mikrotileres' + ' ' + delightmakromodeloutpath + ' ' + highmakroexportparams + \
-            ' -calculateOrthoProjection ' + row['rcorthoboxoutpath'] + ' -selectOrthoProjection ' + 'makrotile2D_' + str(row['GridId']) + ' -exportOrthoProjection ' + orthodiffuseoutpath + ' ' + exportorthodiffuseparams + ' -exportOrthoProjection ' + orthodemoutpath + ' ' + exportorthodemparams 
-        
+            ' -calculateOrthoProjection ' + row['rcorthoboxoutpath'] + ' -selectOrthoProjection ' + 'makrotile2D_' + str(row['GridId']) + ' -exportOrthoProjection ' + orthodiffuseoutpath + ' ' + exportorthodiffuseparams + ' -exportOrthoProjection ' + orthodemoutpath + ' ' + exportorthodemparams
+
         commandlist.append(makrotilecommand)
-    
+
     return commandlist
 
 def ProduceLandscape( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-        makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' +  ' -calculateOrthoProjection ' + row['rcorthoboxoutpath'] + ' -selectOrthoProjection ' + 'makrotile2D_' + str(row['GridId']) + ' -exportOrthoProjection ' + orthodiffuseoutpath + ' ' + exportorthodiffuseparams + ' -exportOrthoProjection ' + orthodemoutpath + ' ' + exportorthodemparams 
-        
+        makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' +  ' -calculateOrthoProjection ' + row['rcorthoboxoutpath'] + ' -selectOrthoProjection ' + 'makrotile2D_' + str(row['GridId']) + ' -exportOrthoProjection ' + orthodiffuseoutpath + ' ' + exportorthodiffuseparams + ' -exportOrthoProjection ' + orthodemoutpath + ' ' + exportorthodemparams
+
         commandlist.append(makrotilecommand)
-    
+
     return commandlist
 
 def ProduceMikro3DTiles( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
         makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly'
-        
+
         commandlist.append(makrotilecommand)
         mikrogrid = row['mikrogrid']
         #print(type(mikrogrid))
@@ -1322,19 +1402,19 @@ def ProduceMikro3DTiles( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, 
 
 
             commandlist.append(mikrotilecommand)
-    
+
     return commandlist
 
 
 def ProduceLODTiles( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-      
+
         makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' + ' -deselectModelTriangles  -setReconstructionRegion ' + \
             row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight' + \
              ' -unwrap '+ unwrapparamspath + ' -reprojectTexture ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + reprojectparams + \
@@ -1344,20 +1424,20 @@ def ProduceLODTiles( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, Base
         #print(type(mikrogrid))
         #mikrogrid_df = gpd.GeoDataFrame(mikrogrid)
         print('Makrogrid',row['GridId'])
-       
 
-    
+
+
     return commandlist
 
 def ProduceMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-      
+
         makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight' + \
             ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + makromodeloutpath + ' ' + exportparams
         commandlist.append(makrotilecommand)
@@ -1365,16 +1445,16 @@ def ProduceMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLow
         #print(type(mikrogrid))
         #mikrogrid_df = gpd.GeoDataFrame(mikrogrid)
         print('Makrogrid',row['GridId'])
-       
+
 def ProduceLODTilesandOriginal( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-      
+
         makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' + ' -deselectModelTriangles  -setReconstructionRegion ' + \
             row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight' + \
              ' -unwrap '+ unwrapparamspath + ' -reprojectTexture ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + reprojectparams + \
@@ -1388,13 +1468,13 @@ def ProduceLODTilesandOriginal( makrogrid_df, RCpath, instanceName, BaseHighpoly
 
 def ProduceLODTilesandOriginalandRetexture( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-      
+
         makrotilecommand = '-selectModel ' + BaseHighpolymodel + \
             ' -selectAllImages -enableTexturingAndColoring false -enableInComponent false -deselectAllImages -importImageSelection ' + row['rcimagelistoutpath'] + ' -enableTexturingAndColoring true -enableInComponent true' + \
             ' -deselectModelTriangles' + ' -setReconstructionRegion ' + row['rcboxwideoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highestpoly' + \
@@ -1414,13 +1494,13 @@ def ProduceLODTilesandOriginalandRetexture( makrogrid_df, RCpath, instanceName, 
 
 def ProduceLODTilesandOriginalandRetextureExport( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
         commandlist = []
-    
+
         for index, row in makrogrid_df.iterrows():
             delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
             makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
             orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
             orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-        
+
             makrotilecommand = '-selectModel makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + \
                     ' -exportLod ' + makromodeloutpath + ' ' + makrolodexportparams + \
                     ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + makromodeloutpath + ' ' + exportparams
@@ -1433,13 +1513,13 @@ def ProduceLODTilesandOriginalandRetextureExport( makrogrid_df, RCpath, instance
 
 def ProduceMakroWithNormals( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
         orthodiffuseoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_diffuse.tiff')
         orthodemoutpath = os.path.join(outputfolder, 'makrotile2D_' + str(row['GridId']) + '_dem.tiff')
-      
+
         makrotilecommand = '-importModel ' + delightmakromodeloutpath + ' -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' + ' -deselectModelTriangles  -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -deselectModelTriangles -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight' + \
             ' -unwrap '+ unwrapparamspath + \
         ' -reprojectTexture ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' +  ' ' + 'makrotile3D_' + str(row['GridId']) + '_highpolyTight ' + reprojectparams + \
@@ -1454,7 +1534,7 @@ def ProduceMakroWithNormals( makrogrid_df, RCpath, instanceName, BaseHighpolymod
 
 def createNormaldetailMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymodel, BaseLowpolymodel, BaseMakroLowpolymodel, unwrapparamspath, makrounwrapparamspath,  reprojectparams, makroreprojectparams, exportparams, makroexportparams, outputfolder,  exportorthodiffuseparams,  exportorthodemparams ):
     commandlist = []
-   
+
     for index, row in makrogrid_df.iterrows():
         delightmakromodeloutpath = os.path.join(outputfolder, 'delightmakrotile3D_' + str(row['GridId']) + '.fbx')
         makromodeloutpath = os.path.join(outputfolder, 'makrotile3D_' + str(row['GridId']) + '.fbx')
@@ -1465,8 +1545,8 @@ def createNormaldetailMakro( makrogrid_df, RCpath, instanceName, BaseHighpolymod
             ' -deselectModelTriangles' + ' -setReconstructionRegion ' + row['rcboxtightoutpath'] + ' -selectTrianglesInsideReconReg -invertTrianglesSelection -removeSelectedTriangles -renameSelectedModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly' + \
             ' -unwrap ' + unwrapparamspath +' -calculateTexture' + \
             ' -exportModel ' + 'makrotile3D_' + str(row['GridId']) + '_highpoly ' + makromodeloutpath + ' ' + exportparams
-            
-        
+
+
         commandlist.append(makrotilecommand)
-    
+
     return commandlist

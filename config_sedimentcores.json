@@ -40,8 +40,8 @@
     "overwrite_alignment_rcproj": true,
     "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment_sedimentcores.rccmd",
     "reconstructsettings": "E:/GitHub/RCprocessing/RCsettings_reconstruction.rccmd",
-    "constantrcbox":"", 
-    "startorthobox":"E:/WES_paleoenvi/utils/orthomosaicbox_down2.rcortho",  
+    "constantrcbox":"",
+    "startorthobox":"E:/WES_paleoenvi/utils/orthomosaicbox_down2.rcortho",
     "texturingsettings": "E:/GitHub/RCprocessing/RCsettings_texturing.rccmd",
     "use_gcps": true,
     "constantgcps":"",
@@ -58,7 +58,6 @@
     "devimage_format": ".png",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/extracore",
+    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/Cores/multiple4",
     "UEdestination": "/Game/WES_paleoenvi/cores/"
 }
-    
