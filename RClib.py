@@ -6,6 +6,7 @@ import os
 import json
 import itertools
 import pandas as pd
+import exifread
 import pathconfig
 from datetime import datetime 
 import geopandas as gpd
@@ -27,7 +28,55 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_sedimentcores.json')
+config = loadconfigs('E:/GitHub/RCprocessing/config_sedimentcores.json')
+
+
+def sort_image_series(folderpath, timedelta=60):
+    # List all files in folderpath
+    files = os.listdir(folderpath)
+    # Filter only JPG and DNG files
+    files = [f for f in files if f.endswith('.JPG') or f.endswith('.dng')]
+
+    # Read image metadata using exifread
+    image_data = []
+    for f in files:
+        path = os.path.join(folderpath, f)
+        with open(path, 'rb') as file:
+            tags = exifread.process_file(file, details=False)
+            datetime_str = str(tags.get('EXIF DateTimeOriginal'))
+            datetime_obj = datetime.strptime(datetime_str, '%Y:%m:%d %H:%M:%S')
+            image_data.append({'filename': f, 'datetime': datetime_obj})
+
+    # Sort image data by datetime
+    image_data.sort(key=lambda x: x['datetime'])
+
+    # Cluster images by datetime
+    clusters = []
+    cluster_start = None
+    for data in image_data:
+        if cluster_start is None:
+            cluster_start = data['datetime']
+            clusters.append([data['filename']])
+        else:
+            time_diff = data['datetime'] - cluster_start
+            if time_diff.total_seconds() <= timedelta:
+                clusters[-1].append(data['filename'])
+                cluster_start = data['datetime']
+            else:
+                cluster_start = data['datetime']
+                clusters.append([data['filename']])
+                cluster_start = data['datetime']
+
+    # Create new folders and move images into them
+    for i, cluster in enumerate(clusters):
+        new_folder = os.path.join(folderpath, f'cluster_{i+1}')
+        os.makedirs(new_folder)
+        for filename in cluster:
+            src_path = os.path.join(folderpath, filename)
+            dst_path = os.path.join(new_folder, filename)
+            shutil.move(src_path, dst_path)
+
+
 
 def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
     scandf = []
