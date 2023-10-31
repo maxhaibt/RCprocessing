@@ -26,7 +26,8 @@ from rasterio.env import Env
 
 
 
-def process_files(file_paths, progress, status, should_continue):
+def process_files(file_paths, progress, status, should_continue, root):
+    epsg_code = ask_for_epsg(root)
     num_files = len(file_paths)
     progress["maximum"] = num_files
 
@@ -44,10 +45,10 @@ def process_files(file_paths, progress, status, should_continue):
 
         # Reproject and warp
         with rasterio.open(file_path) as src:
-            transform, width, height = calculate_default_transform(src.crs, 'EPSG:32638', src.width, src.height, *src.bounds)
+            transform, width, height = calculate_default_transform(src.crs, epsg_code, src.width, src.height, *src.bounds)
             kwargs = src.meta.copy()
             kwargs.update({
-                'crs': 'EPSG:32638',
+                'crs': epsg_code,
                 'transform': transform,
                 'width': width,
                 'height': height
@@ -60,7 +61,7 @@ def process_files(file_paths, progress, status, should_continue):
                         src_transform=src.transform,
                         src_crs=src.crs,
                         dst_transform=transform,
-                        dst_crs='EPSG:32638')
+                        dst_crs=epsg_code)
 
         with Env(GDAL_PAM_ENABLED='YES'):
             # Translate to GeoPackage
@@ -88,9 +89,29 @@ def process_files(file_paths, progress, status, should_continue):
         status.set("Operation completed successfully!")
         messagebox.showinfo("Info", "Operation completed successfully!")
 
+def ask_for_epsg(root):
+    def on_submit():
+        epsg_code.set(epsg_entry.get())
+        popup.destroy()
 
+    popup = tk.Toplevel(root)
+    popup.title("Enter EPSG Code")
+    
+    tk.Label(popup, text="Enter EPSG Code:").pack(padx=20, pady=5)
+    
+    epsg_code = tk.StringVar()
+    epsg_entry = tk.Entry(popup, textvariable=epsg_code)
+    epsg_entry.pack(padx=20, pady=5)
+    
+    submit_button = tk.Button(popup, text="Submit", command=on_submit)
+    submit_button.pack(pady=10)
+    
+    root.wait_window(popup)
+    
+    return epsg_code.get()
 
-def profilemappping_to_gpkg(raster_files, output_gpkg):
+def profilemappping_to_gpkg(raster_files, output_gpkg, root):
+    epsg_code = ask_for_epsg(root)
     data = []
     lines = []
     for raster_file in raster_files:
@@ -112,11 +133,11 @@ def profilemappping_to_gpkg(raster_files, output_gpkg):
             })
             
     # Save rectangles layer
-    gdf = gpd.GeoDataFrame(data, crs='EPSG:32638', geometry='geometry')
+    gdf = gpd.GeoDataFrame(data, crs=epsg_code, geometry='geometry')
     gdf.to_file(output_gpkg, layer='rectangles', driver='GPKG')
     
     # Save upper_lines layer
-    gdf_lines = gpd.GeoDataFrame(lines, crs='EPSG:32638', geometry='geometry')
+    gdf_lines = gpd.GeoDataFrame(lines, crs=epsg_code, geometry='geometry')
     gdf_lines.to_file(output_gpkg, layer='upper_lines', driver='GPKG') 
 
     # Save orthoboxes layer
@@ -335,7 +356,8 @@ def open_file_browser_hugeTiffs2GIS(root):
         abort_button.pack()
 
         # Start a new thread for the processing
-        threading.Thread(target=process_files, args=(file_paths, progress, status, should_continue)).start()
+
+        threading.Thread(target=process_files, args=(file_paths, progress, status, should_continue, root)).start()
 
 
 def open_file_browser_sideviewTiffs2GIS(root):
@@ -358,4 +380,4 @@ def open_file_browser_sideviewTiffs2GIS(root):
         abort_button.pack()
 
         # Start a new thread for the processing
-        threading.Thread(target=process_sideview_files, args=(file_paths, progress, status, should_continue)).start()
+        threading.Thread(target=process_sideview_files, args=(file_paths, progress, status, should_continue, root)).start()

@@ -11,13 +11,13 @@ def main():
     root.title("RC2GIS")  # Set the title of the window
 
     # Create a button for each tool
-    btn_Orthobox2GIS = tk.Button(root, text="Orthobox2GIS", command=lambda: toolbox.open_file_browser_Orthobox2GIS(root))
+    btn_Orthobox2GIS = tk.Button(root, text="Orthobox2GIS", command=lambda: toolbox.open_file_browser_Orthobox2GIS(root, root))
     btn_Orthobox2GIS.pack(pady=20)  # Add some padding around the button
 
-    btn_hugeTiffs2GIS = tk.Button(root, text="hugeTiffs2GIS", command=lambda: toolbox.open_file_browser_hugeTiffs2GIS(root))
+    btn_hugeTiffs2GIS = tk.Button(root, text="hugeTiffs2GIS", command=lambda: toolbox.open_file_browser_hugeTiffs2GIS(root, root))
     btn_hugeTiffs2GIS.pack(pady=20)  # Add some padding around the button#
 
-    btn_hugeTiffs2GIS = tk.Button(root, text="sideviewTiffs2GIS", command=lambda: toolbox.open_file_browser_sideviewTiffs2GIS(root))
+    btn_hugeTiffs2GIS = tk.Button(root, text="sideviewTiffs2GIS", command=lambda: toolbox.open_file_browser_sideviewTiffs2GIS(root, root))
     btn_hugeTiffs2GIS.pack(pady=20)  # Add some padding around the button
 
     root.mainloop()
