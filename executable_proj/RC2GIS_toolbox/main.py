@@ -21,5 +21,7 @@ def main():
     btn_hugeTiffs2GIS.pack(pady=20)  # Add some padding around the button
 
     root.mainloop()
+print("Running main.py")
 if __name__ == "__main__":
+    print("Running main.py")
     main()
