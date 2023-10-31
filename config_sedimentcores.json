@@ -3,7 +3,14 @@
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
     "messagepath": "E:/WES_paleoenvi/utils",
     "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/WES_paleoenvi/cores/URUK15",
-    "excludescanids": [],
+    "excludescanids": ["URUK15_5to6m","URUK15_6to7m","URUK15_7to8m","URUK15_8to9m","URUK15_9to10m"
+    ,"URUK15_10to11m"
+    ,"URUK15_11to12m"
+    ,"URUK15_12to13m"
+    ,"URUK15_1to2m"
+    ,"URUK15_2to3m"
+    ,"URUK15_3to4m"
+    ,"URUK15_4to5m"],
     "alignmentreport_template": "E:/GitHub/RCprocessingAlignmentView.html",
     "overwrite_dev-img": false,
     "overwrite_imagelist": true,
@@ -46,11 +53,11 @@
     "basegcps": "E:/WES_paleoenvi/utils/RKSframeCPs.csv",
     "gcpsparamfile":"E:/WES_paleoenvi/utils/gcps_param_sedimentcore.xml",
     "constantpp3file":"E:/WES_paleoenvi/utils/DSC05902.dng.pp3",
-    "baseimageformat":"*.JPG",
+    "baseimageformat":"*.png",
     "devimage_param":" -b8 -tz ",
-    "devimage_format": ".JPG",
+    "devimage_format": ".png",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/extracore",
+    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/Cores/multiple4",
     "UEdestination": "/Game/WES_paleoenvi/cores/"
 }
