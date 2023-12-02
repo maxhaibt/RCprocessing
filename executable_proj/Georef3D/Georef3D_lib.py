@@ -446,17 +446,32 @@ class GeoReferencer(QMainWindow):
         self.setGeometry(100, 100, 800, 600)
     
     def handle_imported_data(self, imported_data):
-        # Process the imported data and update the lists
-        print(imported_data)
-        for row_data in imported_data:
-            print(row_data)
-            name = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else ""
-            u, v = (row_data[self.dialog.mapping.get("u", -1)], row_data[self.dialog.mapping.get("v", -1)]) if "u" in self.dialog.mapping and "v" in self.dialog.mapping else (None, None)
-            x, y, z = (row_data[self.dialog.mapping.get("x", -1)], row_data[self.dialog.mapping.get("y", -1)], row_data[self.dialog.mapping.get("z", -1)]) if all(key in self.dialog.mapping for key in ["x", "y", "z"]) else (None, None, None)
+        # Clear existing data
+        self.image_coordinates.clear()
+        self.real_world_coordinates.clear()
 
-            self.refpointnames.append(name)
-            self.image_coordinates.append((u, v))
-            self.real_world_coordinates.append((x, y, z))
+        for row_data in imported_data:
+            try:
+                name = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else None
+                u = float(row_data[self.dialog.mapping.get("u", -1)]) if "u" in self.dialog.mapping else None
+                v = float(row_data[self.dialog.mapping.get("v", -1)]) if "v" in self.dialog.mapping else None
+                x = float(row_data[self.dialog.mapping.get("x", -1)]) if "x" in self.dialog.mapping else None
+                y = float(row_data[self.dialog.mapping.get("y", -1)]) if "y" in self.dialog.mapping else None
+                z = float(row_data[self.dialog.mapping.get("z", -1)]) if "z" in self.dialog.mapping else None
+                self.refpointnames.append(name)
+                self.image_coordinates.append((u, v))
+                self.real_world_coordinates.append((x, y, z))
+            except ValueError as e:
+                print(f"Invalid data: {e}")
+    @pyqtSlot()
+    def update_table_with_imported_data(self):
+        num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
+        self.table.setRowCount(num_rows)
+
+        for i in range(num_rows):
+            self.table.setItem(i, 0, QTableWidgetItem(self.refpointnames[i] if i < len(self.refpointnames) else ""))
+            self.table.setItem(i, 1, QTableWidgetItem(f"{self.image_coordinates[i][0]},{self.image_coordinates[i][1]}" if i < len(self.image_coordinates) and self.image_coordinates[i] is not None else ""))
+            self.table.setItem(i, 2, QTableWidgetItem(f"{self.real_world_coordinates[i][0]},{self.real_world_coordinates[i][1]},{self.real_world_coordinates[i][2]}" if i < len(self.real_world_coordinates) and self.real_world_coordinates[i] is not None else ""))
 
 
 
@@ -500,6 +515,7 @@ class GeoReferencer(QMainWindow):
                 self.table.setItem(i, 2, QTableWidgetItem(f"{x},{y},{z}"))
 
         self.update_reference_and_corner_points_on_canvas()
+        self.update_table_with_imported_data()
 
     @pyqtSlot()
     def export_mesh(self):
