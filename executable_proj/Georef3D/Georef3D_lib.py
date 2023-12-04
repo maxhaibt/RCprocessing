@@ -3,6 +3,7 @@ import json
 import numpy as np
 import open3d as o3d
 import open3d.visualization.rendering as rendering
+import pandas as pd
 from PIL import Image, ImageDraw
 from PyQt5.QtWidgets import QApplication
 
@@ -194,13 +195,18 @@ class CustomGraphicsView(QGraphicsView):
 
     def draw_reference_point(self, x, y, color=Qt.red):
         """Draw a reference point as a vector ellipse on the QGraphicsScene."""
-        ellipse_item = self.scene().addEllipse(x-3, y-3, 6, 6, QPen(color), QBrush(color))
-        return ellipse_item
-
-    def draw_error_line(self, start_point, end_point, color=Qt.red):
-        """Draw an error line between two points on the QGraphicsScene."""
-        line_item = self.scene().addLine(start_point[0], start_point[1], end_point[0], end_point[1], QPen(color))
-        return line_item
+        if x is not None and y is not None:
+            if isinstance(x, (float)) and isinstance(y, (float)):
+                ellipse_item = self.scene().addEllipse(x-3, y-3, 6, 6, QPen(color), QBrush(color))
+                return ellipse_item
+            else:
+                print(f"Skipping drawing point at ({x}, {y}) due to invalid coordinates.")
+        else:
+            print(f"Skipping drawing point at ({x}, {y}) due to None value.")
+        #def draw_error_line(self, start_point, end_point, color=Qt.red):
+           #"""Draw an error line between two points on the QGraphicsScene."""
+           #line_item = self.scene().addLine(start_point[0], start_point[1], end_point[0], end_point[1], QPen(color))
+            #return line_item
     
 
 class CSVStructureDialog(QDialog):
@@ -259,7 +265,7 @@ class CSVStructureDialog(QDialog):
         # Add mapping selection dropdowns in the first row (above the header, excluding the additional column)
         for col, header in enumerate(csv_data[0]):
             combo = QComboBox(self)
-            combo.addItems(["-", "u", "v", "x", "y", "z", "name"])  # Added "name" here
+            combo.addItems(["-", "name", "u", "v", "x", "y", "z"]) 
             combo.currentIndexChanged.connect(lambda idx, col=col, combo=combo: self.update_mapping(col, combo))
             combo.setFixedWidth(self.table.columnWidth(col + 1))  # Set the width of the combo box to match the column width
             self.table.setCellWidget(0, col + 1, combo)  # Add to the first row (shifted by 1)
@@ -347,9 +353,9 @@ class GeoReferencer(QMainWindow):
         self.image = None
         self.original_image = None
         self.image_path = ""
-        self.refpointnames = []
-        self.image_coordinates = []
-        self.real_world_coordinates = []
+        self.reference_points = pd.DataFrame(columns=['name', 'u', 'v', 'x', 'y', 'z', 'rmse'])
+        self.reference_points = self.reference_points.astype({'name': 'str'  ,'u': 'float64', 'v': 'float64', 'x': 'float64', 'y': 'float64', 'z': 'float64', 'rmse': 'float64'})
+        self.reference_points['rmse'] = np.nan
         self.mesh = None
         self.editing_uv_for_row = None
 
@@ -412,13 +418,12 @@ class GeoReferencer(QMainWindow):
         self.table = QTableWidget(self)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setColumnCount(4)  # Changed from 3 to 4
-        self.table.setHorizontalHeaderLabels(["Name", "Pixel Coordinates", "Real-world Coordinates", "RMSE"])  # Added "Name"
+        self.table.setColumnCount(7)  # Change to 7 columns
+        #self.table.setHorizontalHeaderLabels(["Name", "U", "V", "X", "Y", "Z", "RMSE"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
-        self.table.cellDoubleClicked.connect(self.on_table_cell_double_clicked)
         self.table.cellChanged.connect(self.on_table_cell_changed)
-
+        self.table.cellDoubleClicked.connect(self.on_table_cell_double_clicked)
         # Buttons
 
         self.calc_transform_button = QPushButton("Calculate Transformation", self)
@@ -446,35 +451,24 @@ class GeoReferencer(QMainWindow):
         self.setGeometry(100, 100, 800, 600)
     
     def handle_imported_data(self, imported_data):
-        # Clear existing data
-        self.image_coordinates.clear()
-        self.real_world_coordinates.clear()
 
         for row_data in imported_data:
+            print(row_data)
+            refpoint = {}
             try:
-                name = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else None
-                u = float(row_data[self.dialog.mapping.get("u", -1)]) if "u" in self.dialog.mapping else None
-                v = float(row_data[self.dialog.mapping.get("v", -1)]) if "v" in self.dialog.mapping else None
-                x = float(row_data[self.dialog.mapping.get("x", -1)]) if "x" in self.dialog.mapping else None
-                y = float(row_data[self.dialog.mapping.get("y", -1)]) if "y" in self.dialog.mapping else None
-                z = float(row_data[self.dialog.mapping.get("z", -1)]) if "z" in self.dialog.mapping else None
-                self.refpointnames.append(name)
-                self.image_coordinates.append((u, v))
-                self.real_world_coordinates.append((x, y, z))
+                refpoint['name'] = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else None
+                refpoint['u'] = float(row_data[self.dialog.mapping.get("u", -1)]) if "u" in self.dialog.mapping else np.nan
+                refpoint['v'] = float(row_data[self.dialog.mapping.get("v", -1)]) if "v" in self.dialog.mapping else np.nan
+                refpoint['x'] = float(row_data[self.dialog.mapping.get("x", -1)]) if "x" in self.dialog.mapping else np.nan
+                refpoint['y'] = float(row_data[self.dialog.mapping.get("y", -1)]) if "y" in self.dialog.mapping else np.nan
+                refpoint['z'] = float(row_data[self.dialog.mapping.get("z", -1)]) if "z" in self.dialog.mapping else np.nan
+                self.reference_points = pd.concat([self.reference_points, pd.DataFrame([refpoint])], ignore_index=True)
             except ValueError as e:
                 print(f"Invalid data: {e}")
-    @pyqtSlot()
-    def update_table_with_imported_data(self):
-        num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
-        self.table.setRowCount(num_rows)
-
-        for i in range(num_rows):
-            self.table.setItem(i, 0, QTableWidgetItem(self.refpointnames[i] if i < len(self.refpointnames) else ""))
-            self.table.setItem(i, 1, QTableWidgetItem(f"{self.image_coordinates[i][0]},{self.image_coordinates[i][1]}" if i < len(self.image_coordinates) and self.image_coordinates[i] is not None else ""))
-            self.table.setItem(i, 2, QTableWidgetItem(f"{self.real_world_coordinates[i][0]},{self.real_world_coordinates[i][1]},{self.real_world_coordinates[i][2]}" if i < len(self.real_world_coordinates) and self.real_world_coordinates[i] is not None else ""))
 
 
-
+    
+    
     @pyqtSlot()
     def load_reference_points(self):
         filepath, _ = QFileDialog.getOpenFileName(self, "Select a JSON or CSV file", "", "JSON files (*.json);;CSV files (*.csv);;All Files (*)")
@@ -482,9 +476,7 @@ class GeoReferencer(QMainWindow):
         if filepath.endswith(".json"):
             with open(filepath, 'r') as file:
                 data = json.load(file)
-            self.refpointnames = data.get('name', [])
-            self.image_coordinates = data.get('image_coordinates', [])
-            self.real_world_coordinates = data.get('real_world_coordinates', [])
+            self.reference_points = self.reference_points + pd.DataFrame(data['reference_points'])
 
         elif filepath.endswith(".csv"):
             import csv
@@ -497,25 +489,31 @@ class GeoReferencer(QMainWindow):
             # Connect the signal to the slot here
             self.dialog.data_imported.connect(self.handle_imported_data)
             result = self.dialog.exec_()
-            print(self.refpointnames)
+
 
         # Determine the number of rows based on the longest list
-        num_rows = max(len(self.refpointnames), len(self.image_coordinates), len(self.real_world_coordinates))
+        num_rows = len(self.reference_points)
         self.table.setRowCount(num_rows)
 
-        # Populate the table with the data from the lists
-        for i in range(num_rows):
-            if i < len(self.refpointnames):
-                self.table.setItem(i, 0, QTableWidgetItem(self.refpointnames[i]))
-            if i < len(self.image_coordinates):
-                u, v = self.image_coordinates[i]
-                self.table.setItem(i, 1, QTableWidgetItem(f"{u},{v}"))
-            if i < len(self.real_world_coordinates):
-                x, y, z = self.real_world_coordinates[i]
-                self.table.setItem(i, 2, QTableWidgetItem(f"{x},{y},{z}"))
-
         self.update_reference_and_corner_points_on_canvas()
-        self.update_table_with_imported_data()
+        self.update_table_with_dataframe()
+    
+    @pyqtSlot()
+    def update_table_with_dataframe(self):
+        self.table.setRowCount(self.reference_points.shape[0])
+        self.table.setColumnCount(self.reference_points.shape[1])
+        self.table.setHorizontalHeaderLabels(self.reference_points.columns)
+
+        for i, row in self.reference_points.iterrows():
+            for j, value in enumerate(row):
+                item = QTableWidgetItem(str(value) if value else "")
+                self.table.setItem(i, j, item)
+
+        #self.table.cellChanged.connect(self.on_cell_changed)
+
+
+
+
 
     @pyqtSlot()
     def export_mesh(self):
@@ -575,16 +573,19 @@ class GeoReferencer(QMainWindow):
         except FileNotFoundError:
             return False
 
-    def on_image_click(self, x, y):
+
+
+    def on_image_click(self, u, v):
+        u = float(u)
+        v = float(v)
         if hasattr(self, 'editing_uv_for_row') and self.editing_uv_for_row is not None:
-            self.image_coordinates[self.editing_uv_for_row] = (x, y)
-            self.table.setItem(self.editing_uv_for_row, 1, QTableWidgetItem(f"{x},{y}"))
+            self.reference_points.loc[self.editing_uv_for_row, 'u'] = u
+            self.reference_points.loc[self.editing_uv_for_row, 'v'] = v
             delattr(self, 'editing_uv_for_row')
 
-            self.update_reference_and_corner_points_on_canvas()
         else:
             # Store clicked image coordinates
-            self.image_coordinates.append((x, y))
+            new_point = {'u': u, 'v': v, 'x': np.nan, 'y': np.nan, 'z': np.nan, 'rmse': np.nan}
 
             # Prompt user for real-world coordinates
             coords, ok = QInputDialog.getText(self, "Input", "Enter real-world coordinates (x, y, z):")
@@ -595,26 +596,25 @@ class GeoReferencer(QMainWindow):
                     print("Invalid coordinates.")
                     return
                 rw_x, rw_y, rw_z = map(float, coords_list)
-                self.real_world_coordinates.append((rw_x, rw_y, rw_z))
+                new_point['x'] = float(rw_x)
+                new_point['y'] = float(rw_y)
+                new_point['z'] = float(rw_z)
+
+                self.reference_points = pd.concat([self.reference_points, pd.DataFrame([new_point])], ignore_index=True)
 
                 # Draw a point on the image where the user clicked
-                draw = ImageDraw.Draw(self.image)
-                draw.ellipse([(x-3, y-3), (x+3, y+3)], fill='red')
+                #draw = ImageDraw.Draw(self.image)
+                #draw.ellipse([(x-3, y-3), (x+3, y+3)], fill='red')
 
                 # Update the image
-                qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
-                pixmap = QPixmap.fromImage(qim)
-                self.scene.clear()
-                self.scene.addPixmap(pixmap)
-                self.view.setScene(self.scene)
-
-                # Add to the reference table
-                row_position = self.table.rowCount()
-                self.table.insertRow(row_position)
-                self.table.setItem(row_position, 1, QTableWidgetItem(f"{x},{y}"))
-                self.table.setItem(row_position, 2, QTableWidgetItem(f"{rw_x},{rw_y},{rw_z}"))
-
-                self.update_reference_and_corner_points_on_canvas()
+                #qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
+                #pixmap = QPixmap.fromImage(qim)
+                #self.scene.clear()
+                #self.scene.addPixmap(pixmap)
+                #self.view.setScene(self.scene)
+        self.update_table_with_dataframe()
+        self.update_reference_and_corner_points_on_canvas()
+        
 
     def ask_for_image_file(self):
         options = QFileDialog.Options()
@@ -643,36 +643,15 @@ class GeoReferencer(QMainWindow):
         self.view.setScene(self.scene)
     
     def on_table_cell_double_clicked(self, row, column):
-        if column == 1:  # Assuming u,v is column 1
+        if column in ['u','v']:  # Assuming u,v is column 1
             self.editing_uv_for_row = row  # Create this attribute in __init__
-            self.view.scene().removeItem(self.image_coordinates[row])  # Assuming you store QGraphicsItem for each point
+            #self.view.scene().removeItem(self.reference_points[]  # Assuming you store QGraphicsItem for each point
 
     def on_table_cell_changed(self, row, column):
         value = self.table.item(row, column).text()
-
-        # If it's the name column, skip processing
-        if column == 0:
-            return
-
-        # If it's the image_coordinates column
-        if column == 1:
-            try:
-                x, y = map(int, value.split(','))
-                self.image_coordinates[row] = (x, y)
-            except ValueError:
-                # Handle invalid values (either by logging, showing a message, or setting a default value)
-                pass
-
-        # If it's the real_world_coordinates column
-        if column == 2:
-            try:
-                x, y, z = map(float, value.split(','))
-                self.real_world_coordinates[row] = (x, y, z)
-            except ValueError:
-                # Handle invalid values (either by logging, showing a message, or setting a default value)
-                pass
-
+        self.reference_points.iat[row, column] = value  # Update DataFrame
         self.update_reference_and_corner_points_on_canvas()
+
 
     @pyqtSlot()
     def save_reference_points(self):
@@ -948,6 +927,7 @@ class GeoReferencer(QMainWindow):
         
         return box_pcd_utm, box_mesh
 
+
     def update_reference_and_corner_points_on_canvas(self):
         """
         Update the reference and corner points on the canvas.
@@ -958,40 +938,41 @@ class GeoReferencer(QMainWindow):
                 self.view.scene().removeItem(item)
 
         # Get transformed UV coordinates using the transformation matrix
-        if hasattr(self, 'transformation_matrix'):  # Ensure transformation matrix is available
-            transformed_uv = transform_real_to_uv(np.array(self.real_world_coordinates), self.transformation_matrix)
-            corners_uv = transform_real_to_uv(transform_image_corners(self.original_image, self.transformation_matrix), self.transformation_matrix)
-        else:
-            transformed_uv = self.image_coordinates  # Default to original if no transformation matrix available
-            corners_uv = [(0, 0), (self.original_image.width, 0), (0, self.original_image.height), (self.original_image.width, self.original_image.height)]
+        #if hasattr(self, 'transformation_matrix'):  # Ensure transformation matrix is available
+            #transformed_uv = transform_real_to_uv(np.array(self.reference_points[['x']]), self.transformation_matrix)
+            #corners_uv = transform_real_to_uv(transform_image_corners(self.original_image, self.transformation_matrix), self.transformation_matrix)
+        #else:
+            #transformed_uv = self.image_coordinates  # Default to original if no transformation matrix available
+            #corners_uv = [(0, 0), (self.original_image.width, 0), (0, self.original_image.height), (self.original_image.width, self.original_image.height)]
 
         # Draw points
-        for orig, trans in zip(self.image_coordinates, transformed_uv):
+        for i, row in self.reference_points.iterrows():
+
             # Original user-input points
-            self.view.draw_reference_point(orig[0], orig[1], color=Qt.red)
+            self.view.draw_reference_point(float(row['u']), float(row['v']), color=Qt.red)
             # Transformed points
-            self.view.draw_reference_point(trans[0], trans[1], color=Qt.blue)
+            #self.view.draw_reference_point(trans[0], trans[1], color=Qt.blue)
             # Error line
-            self.view.draw_error_line(orig, trans, color=Qt.red)
+            #self.view.draw_error_line(orig, trans, color=Qt.red)
 
         # Draw corner points in green
-        for corner in corners_uv:
-            self.view.draw_reference_point(corner[0], corner[1], color=Qt.green)
+        #for corner in corners_uv:
+            #self.view.draw_reference_point(corner[0], corner[1], color=Qt.green)
 
-
+        
     def calculate_transformation(self):
-        if len(self.image_coordinates) < 4 or len(self.real_world_coordinates) < 4:
+        if len(self.reference_points) < 4:
             print("At least 4 reference points are required.")
             return
-        
+
         # Compute the transformation matrix
-        self.transformation_matrix = compute_projective_transformation(np.array(self.image_coordinates), np.array(self.real_world_coordinates))
-        print('Check: ',self.image_coordinates, self.transformation_matrix)
-        # Compute transformed UV coordinates
-        transformed_real_coords = transform_uv_to_real(np.array(self.image_coordinates), self.transformation_matrix)
-        
-        # Calculate RMSE values for each point and populate the table
-        for i, (trans, real) in enumerate(zip(transformed_real_coords, self.real_world_coordinates)):
-            rmse = np.sqrt(np.sum((np.array(trans) - np.array(real))**2))
-            self.table.setItem(i, 3, QTableWidgetItem(f"{rmse:.4f}"))
-        
+        uv_coords = self.reference_points[['u', 'v']].to_numpy()
+        xyz_coords = self.reference_points[['x', 'y', 'z']].to_numpy()
+        self.transformation_matrix = compute_projective_transformation(uv_coords, xyz_coords)
+
+        # Compute transformed UV coordinates and calculate RMSE
+        transformed_real_coords = transform_uv_to_real(uv_coords, self.transformation_matrix)
+        for i, (trans, real) in enumerate(zip(transformed_real_coords, xyz_coords)):
+            rmse = np.sqrt(np.sum((trans - real)**2))
+            self.reference_points.at[i, 'rmse'] = rmse
+            self.table.setItem(i, 6, QTableWidgetItem(f"{rmse:.4f}"))  # Assuming RMSE is the 7th column
