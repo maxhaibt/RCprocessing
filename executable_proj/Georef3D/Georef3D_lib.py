@@ -1,4 +1,3 @@
-import sys
 import json
 import numpy as np
 import open3d as o3d
@@ -6,99 +5,102 @@ import open3d.visualization.rendering as rendering
 import pandas as pd
 from PIL import Image, ImageDraw
 from PyQt5.QtWidgets import QApplication
-
 from PyQt5.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsScene, QVBoxLayout, QPushButton,
                              QWidget, QFileDialog, QLabel, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QInputDialog, QMenuBar, QMenu, QAction, QGraphicsEllipseItem, QGraphicsLineItem, QDialog, QComboBox,  QHBoxLayout, QCheckBox, QLineEdit, QSizePolicy, QSpacerItem)
+                             QHeaderView, QInputDialog, QMenuBar, QMenu, QAction, QGraphicsEllipseItem, QGraphicsLineItem, QDialog, QComboBox,  QHBoxLayout, QCheckBox, QLineEdit, QSizePolicy, QSpacerItem, QSplitter)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QBrush
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 import copy
 
 
-
-def compute_projective_transformation(uv_coords, xyz_coords):
-    """
-    Compute the 3D-to-3D projective transformation matrix using the DLT method.
-    
-    Parameters:
-    - uv_coords: List of 2D points. Each point is a tuple (u, v).
-    - xyz_coords: List of corresponding 3D points. Each point is a tuple (x, y, z).
-    
-    Returns:
-    - 4x4 projective transformation matrix.
-    """
-    
-    # Augment the UV coordinates with a third dimension (W = 1)
-    uvw_coords = [(u, v, 1) for u, v in uv_coords]
-    
-    # Ensure there are at least 4 point correspondences.
-    if len(uvw_coords) < 4 or len(xyz_coords) < 4:
-        raise ValueError("At least 4 point correspondences are required.")
-    
-    # Construct the matrix A.
-    A = []
-    for (u, v, w), (x, y, z) in zip(uvw_coords, xyz_coords):
-        A.append([u, v, w, 1, 0, 0, 0, 0, 0, 0, 0, 0, -u*x, -v*x, -w*x, -x])
-        A.append([0, 0, 0, 0, u, v, w, 1, 0, 0, 0, 0, -u*y, -v*y, -w*y, -y])
-        A.append([0, 0, 0, 0, 0, 0, 0, 0, u, v, w, 1, -u*z, -v*z, -w*z, -z])
-        
-    A = np.array(A)
-    
-    # Singular Value Decomposition to solve for the transformation matrix.
-    U, S, Vt = np.linalg.svd(A)
-    H = Vt[-1].reshape(4, 4)
-    print(H)
-    return H
+def calculateRMSE(valid_row, transformation_matrix):
+    if transformation_matrix.shape == (4, 4):
+        valid_row['rmse'] =  np.sqrt(
+                np.sum(
+                    (transform_uv_to_real(np.array([[valid_row['u'], valid_row['v']]]), transformation_matrix)[0] - 
+                     np.array([valid_row['x'], valid_row['y'], valid_row['z']]))**2
+                )
+            )
+    elif transformation_matrix.shape == (3, 3):
+        valid_row['rmse'] =  np.sqrt(
+                np.sum(
+                    (transform_uv_to_real(np.array([[valid_row['u'], valid_row['v']]]), transformation_matrix)[0] - 
+                     np.array([valid_row['x'], valid_row['y']]))**2
+                )
+            )
+    return valid_row
 
 
-def transform_uv_to_real(uv_coords, matrix):
-    # Augment the UV coordinates with a third and fourth dimension (W = 1 and homogeneous 1)
-    uvw1 = np.hstack((uv_coords, np.ones((uv_coords.shape[0], 1)), np.ones((uv_coords.shape[0], 1))))
-    
-    # Multiply the UVW1 coordinates by the transformation matrix
-    xyzw = np.dot(uvw1, matrix.T)
-    
-    # Convert back to 3D real-world coordinates
-    return xyzw[:, :3] / xyzw[:, 3:4]
+def calculate_individual_rmse(row, transformation_matrix, transform_uv_to_real):
+    """
+    Calculate the Root Mean Square Error (RMSE) for an individual point.
 
-def transform_real_to_uv(xyz_coords, matrix):
+    :param row: A dictionary representing a single row of data with 'u', 'v', 'x', 'y' (and 'z' if applicable).
+    :param transformation_matrix: The transformation matrix.
+    :param transform_uv_to_real: Function to transform image coordinates to real-world coordinates.
+    :return: RMSE for the individual point.
     """
-    Transforms real-world coordinates to UV coordinates using the given matrix.
+
+    # Extract image coordinates and world coordinates
+    uv_coords = np.array([[row['u'], row['v']]])
+    world_coords = np.array([row['x'], row['y']])
+
+    # Transform image coordinates to world coordinates
+    transformed_coords = transform_uv_to_real(uv_coords, transformation_matrix)
+
+    # Calculate RMSE
+    rmse = np.sqrt(np.sum((transformed_coords[0] - world_coords) ** 2))
+
+    return rmse
+
+
+
+
+def transform_uv_to_real(uv_coords, transformmatrix):
+    if transformmatrix.shape == (4, 4):
+        # Add a third and fourth dimension (W = 1 and homogeneous 1)
+        uv_coords = np.hstack((uv_coords, np.ones((uv_coords.shape[0], 1)), np.ones((uv_coords.shape[0], 1))))
+    elif transformmatrix.shape == (3, 3):
+        # Add a third dimension (homogeneous 1)
+        uv_coords = np.hstack((uv_coords, np.ones((uv_coords.shape[0], 1))))
     
-    Parameters:
-    - xyz_coords: Nx3 numpy array of 3D real-world coordinates.
-    - matrix: 4x4 projective transformation matrix.
-    
-    Returns:
-    - Nx2 numpy array of 2D image coordinates.
-    """
-    # Compute the inverse of the transformation matrix
-    inv_matrix = np.linalg.inv(matrix)
-    
-    # Augment the XYZ coordinates with a fourth dimension (homogeneous 1)
-    xyzw1 = np.hstack((xyz_coords, np.ones((xyz_coords.shape[0], 1))))
-    
-    # Multiply the XYZW1 coordinates by the inverse transformation matrix
-    uvw = np.dot(xyzw1, inv_matrix.T)
-    
+    # Multiply the UV coordinates by the transformation matrix
+    transformed_coords = np.dot(uv_coords, transformmatrix.T)
+    #print('homogeneous coordinates: ', transformed_coords)    
+
+    # Divide by the last column to get back to 2D or 3D coordinates
+    if transformed_coords.shape[1] == 4:
+        # Ensure the homogeneous coordinate is not zero
+        if np.any(transformed_coords[:, 3] == 0):
+            raise ValueError("Homogeneous coordinate is zero, cannot divide")
+        #print('transformed_coords: ', transformed_coords[:, :3] / transformed_coords[:, 3, np.newaxis])
+        return transformed_coords[:, :3] / transformed_coords[:, 3, np.newaxis]
+    elif transformed_coords.shape[1] == 3:
+        # Ensure the homogeneous coordinate is not zero
+        if np.any(transformed_coords[:, 2] == 0):
+            raise ValueError("Homogeneous coordinate is zero, cannot divide")
+        #print('transformed_coords: ', transformed_coords[:, :2] / transformed_coords[:, 2, np.newaxis])
+        return transformed_coords[:, :2] / transformed_coords[:, 2, np.newaxis]
+
+
+
+def transform_real_to_uv(real_coords, transformmatrix):
+    inv_matrix = np.linalg.inv(transformmatrix)
+    # Depending weather the transformation matrix is 3x3 or 4x4, we need to use xy or xyz from the real-world coordinates.
+    if transformmatrix.shape == (4, 4):
+        real_coords = real_coords[:, :3]
+    elif transformmatrix.shape == (3, 3):
+        real_coords = real_coords[:, :2]
+    # Add homogeneous dimension 1
+    real_coords = np.hstack((real_coords, np.ones((real_coords.shape[0], 1))))
+    # Multiply the real-world coordinates by the inverse transformation matrix
+    imagecoords = np.dot(real_coords, inv_matrix.T)
     # Convert back to 2D image coordinates
-    return uvw[:, :2] / uvw[:, 2:3]
+    return imagecoords[:, :2] / imagecoords[:, 2:3]
 
-def transform_image_corners(image, matrix):
-    """
-    Transforms the four corner points of the image to real-world coordinates using the given matrix.
-    
-    Parameters:
-    - image: PIL Image object.
-    - matrix: 4x4 projective transformation matrix.
-    
-    Returns:
-    - List of four real-world coordinates.
-    """
-    width, height = image.size
-    corner_uv_coords = np.array([[0, 0], [width, 0], [0, height], [width, height]])
-    corner_xyz_coords = transform_uv_to_real(corner_uv_coords, matrix)
-    return corner_xyz_coords
+
+
+
 
 def create_mesh_from_obb(obb):
     # Get the 8 corner points of the box
@@ -353,9 +355,8 @@ class GeoReferencer(QMainWindow):
         self.image = None
         self.original_image = None
         self.image_path = ""
-        self.reference_points = pd.DataFrame(columns=['name', 'u', 'v', 'x', 'y', 'z', 'rmse'])
-        self.reference_points = self.reference_points.astype({'name': 'str'  ,'u': 'float64', 'v': 'float64', 'x': 'float64', 'y': 'float64', 'z': 'float64', 'rmse': 'float64'})
-        self.reference_points['rmse'] = np.nan
+        self.reference_points = pd.DataFrame()
+        #self.reference_points = self.reference_points.astype({'name': 'str'  ,'u': 'float', 'v': 'float', 'x': 'float', 'y': 'float', 'z': 'float', 'rmse': 'float'})
         self.mesh = None
         self.editing_uv_for_row = None
 
@@ -408,6 +409,8 @@ class GeoReferencer(QMainWindow):
         self.image_path_label = QLabel("No image loaded", self)
         layout.addWidget(self.image_path_label)
 
+
+
         # GraphicsView for Image
         self.view = CustomGraphicsView(self)
         self.scene = QGraphicsScene(self)
@@ -419,16 +422,38 @@ class GeoReferencer(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setColumnCount(7)  # Change to 7 columns
-        #self.table.setHorizontalHeaderLabels(["Name", "U", "V", "X", "Y", "Z", "RMSE"])
+        self.table.setHorizontalHeaderLabels(["name", "u", "v", "x", "y", "z", "rmse"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
         self.table.cellChanged.connect(self.on_table_cell_changed)
         self.table.cellDoubleClicked.connect(self.on_table_cell_double_clicked)
+
+
+        # Create a splitter
+        splitter = QSplitter(self)
+        splitter.setOrientation(Qt.Vertical)
+
+        # Add GraphicsView and Table to Splitter
+        splitter.addWidget(self.view)
+        splitter.addWidget(self.table)
+
+        # Add Splitter to Layout
+        layout.addWidget(splitter)
+        
         # Buttons
 
-        self.calc_transform_button = QPushButton("Calculate Transformation", self)
-        self.calc_transform_button.clicked.connect(self.calculate_transformation)
-        layout.addWidget(self.calc_transform_button)
+        self.calc_transform_buttonXY = QPushButton("Calculate Transformation XY", self)
+        self.calc_transform_buttonXY.clicked.connect(self.compute_projective_transformation_xy)
+        layout.addWidget(self.calc_transform_buttonXY)
+
+        self.calc_transform_buttonXYZ = QPushButton("Calculate Transformation XYZ", self)
+        self.calc_transform_buttonXYZ.clicked.connect(self.compute_projective_transformation_xyz)
+        layout.addWidget(self.calc_transform_buttonXYZ)
+
+        # Add a button for a function that conducts the transformation and fills in x,y,z from u,v. 
+        self.fillEmptyXYDimensions_button = QPushButton("fillEmptyXYDimensions", self)
+        self.fillEmptyXYDimensions_button.clicked.connect(self.fillEmptyXYDimensions)
+        layout.addWidget(self.fillEmptyXYDimensions_button)
 
         self.view_3d_button = QPushButton("View in 3D", self)
         self.view_3d_button.clicked.connect(self.view_in_3d)
@@ -451,24 +476,41 @@ class GeoReferencer(QMainWindow):
         self.setGeometry(100, 100, 800, 600)
     
     def handle_imported_data(self, imported_data):
+        templistofdicts = []
 
         for row_data in imported_data:
-            print(row_data)
+
             refpoint = {}
             try:
                 refpoint['name'] = row_data[self.dialog.mapping.get("name", -1)] if "name" in self.dialog.mapping else None
-                refpoint['u'] = float(row_data[self.dialog.mapping.get("u", -1)]) if "u" in self.dialog.mapping else np.nan
-                refpoint['v'] = float(row_data[self.dialog.mapping.get("v", -1)]) if "v" in self.dialog.mapping else np.nan
-                refpoint['x'] = float(row_data[self.dialog.mapping.get("x", -1)]) if "x" in self.dialog.mapping else np.nan
-                refpoint['y'] = float(row_data[self.dialog.mapping.get("y", -1)]) if "y" in self.dialog.mapping else np.nan
-                refpoint['z'] = float(row_data[self.dialog.mapping.get("z", -1)]) if "z" in self.dialog.mapping else np.nan
-                self.reference_points = pd.concat([self.reference_points, pd.DataFrame([refpoint])], ignore_index=True)
+                refpoint['u'] = float(row_data[self.dialog.mapping.get("u", -1)]) if "u" in self.dialog.mapping else None
+                refpoint['v'] = float(row_data[self.dialog.mapping.get("v", -1)]) if "v" in self.dialog.mapping else None
+                refpoint['x'] = float(row_data[self.dialog.mapping.get("x", -1)]) if "x" in self.dialog.mapping else None
+                refpoint['y'] = float(row_data[self.dialog.mapping.get("y", -1)]) if "y" in self.dialog.mapping else None
+                refpoint['z'] = float(row_data[self.dialog.mapping.get("z", -1)]) if "z" in self.dialog.mapping else None
+                refpoint['rmse'] = None
+                templistofdicts.append(refpoint)
+
             except ValueError as e:
                 print(f"Invalid data: {e}")
+                continue
+            #print(pd.DataFrame(templistofdicts))
+        self.reference_points = pd.concat([self.reference_points, pd.DataFrame(templistofdicts) ], ignore_index=True)
 
 
-    
-    
+    @pyqtSlot()
+
+    def update_table_with_dataframe(self):
+        self.table.blockSignals(True)
+        self.table.setRowCount(self.reference_points.shape[0])
+        self.table.setColumnCount(self.reference_points.shape[1])
+        self.table.setHorizontalHeaderLabels(self.reference_points.columns)
+
+        for i, row in self.reference_points.iterrows():
+            for j, value in enumerate(row):
+                item = QTableWidgetItem(str(value) if value else "")
+                self.table.setItem(i, j, item)
+        self.table.blockSignals(False)
     @pyqtSlot()
     def load_reference_points(self):
         filepath, _ = QFileDialog.getOpenFileName(self, "Select a JSON or CSV file", "", "JSON files (*.json);;CSV files (*.csv);;All Files (*)")
@@ -476,7 +518,10 @@ class GeoReferencer(QMainWindow):
         if filepath.endswith(".json"):
             with open(filepath, 'r') as file:
                 data = json.load(file)
-            self.reference_points = self.reference_points + pd.DataFrame(data['reference_points'])
+                #uprint(data)
+
+            self.reference_points = pd.concat([self.reference_points, pd.DataFrame(data) ], ignore_index=True)
+
 
         elif filepath.endswith(".csv"):
             import csv
@@ -491,29 +536,136 @@ class GeoReferencer(QMainWindow):
             result = self.dialog.exec_()
 
 
-        # Determine the number of rows based on the longest list
-        num_rows = len(self.reference_points)
-        self.table.setRowCount(num_rows)
-
         self.update_reference_and_corner_points_on_canvas()
         self.update_table_with_dataframe()
     
+
     @pyqtSlot()
-    def update_table_with_dataframe(self):
-        self.table.setRowCount(self.reference_points.shape[0])
-        self.table.setColumnCount(self.reference_points.shape[1])
-        self.table.setHorizontalHeaderLabels(self.reference_points.columns)
+    def save_reference_points(self):
+        if self.reference_points.empty:
+            print("No reference points to save.")
+            return
 
-        for i, row in self.reference_points.iterrows():
-            for j, value in enumerate(row):
-                item = QTableWidgetItem(str(value) if value else "")
-                self.table.setItem(i, j, item)
+        default_filename = self.image_path.rsplit('.', 1)[0] + '.json'
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Reference Points", default_filename, "JSON files (*.json);;All Files (*)")
+        #referencepoints = {'reference_points': self.reference_points.to_dict(orient='records')}
+        records = self.reference_points.to_dict(orient='records')
+        print(records)
 
-        #self.table.cellChanged.connect(self.on_cell_changed)
+        if filepath:
+            with open(filepath, 'w') as file:
+                json.dump(records, file)
+            print(f"Reference points saved to {filepath}")
 
 
 
 
+    def compute_projective_transformation_xyz(self):
+        """
+        Compute the 3D-to-3D projective transformation matrix using the DLT method.
+        Parameters:
+        -self.reference_points: Nx7 pandas DataFrame of reference points.
+        - 4x4 projective transformation matrix.
+        """
+        # select from reference points only the rows that have valid float values not None nor Nan in the columns u,v,x,y,z.
+        valid_rows_3D = self.reference_points[(self.reference_points['u'].notnull()) &
+                                           (self.reference_points['v'].notnull()) &
+                                           (self.reference_points['x'].notnull()) &
+                                           (self.reference_points['y'].notnull()) &
+                                           (self.reference_points['z'].notnull())].copy()
+        print('so many valid rows: ', len(valid_rows_3D))
+        
+        # Check if there are at least 4 valid reference points
+        if len(valid_rows_3D) < 4:
+            raise ValueError("At least 4 reference points are required.")
+
+        
+        # Construct the matrix A.
+        A = []
+        for i, row in valid_rows_3D.iterrows(): 
+            u = row['u']
+            v = row['v']
+            w = 1.0
+            x = row['x']
+            y = row['y']
+            z = 10.0
+            A.append([u, v, w, 1, 0, 0, 0, 0, 0, 0, 0, 0, -u*x, -v*x, -w*x, -x])
+            A.append([0, 0, 0, 0, u, v, w, 1, 0, 0, 0, 0, -u*y, -v*y, -w*y, -y])
+            A.append([0, 0, 0, 0, 0, 0, 0, 0, u, v, w, 1, -u*z, -v*z, -w*z, -z])            
+        A = np.array(A)
+        #print('A: ', A)
+        # Singular Value Decomposition to solve for the transformation matrix.
+        U, S, Vt = np.linalg.svd(A)
+        self.transformation_matrix_xyz = Vt[-1].reshape(4, 4)
+        valid_rows_3D = valid_rows_3D.apply(calculateRMSE, transformation_matrix = self.transformation_matrix_xyz, axis=1)
+        print(self.transformation_matrix_xyz)
+        #Update the original self.reference_points with the calculated RMSE
+        self.reference_points.update(valid_rows_3D)
+
+        #update the table widget
+        self.update_table_with_dataframe()
+    
+    def compute_projective_transformation_xy(self):
+        """
+        Compute the 2D-to-2D projective transformation matrix using the DLT method.
+        Parameters:
+        -self.reference_points: Nx7 pandas DataFrame of reference points.
+        """
+        valid_rows_2D = self.reference_points[(self.reference_points['u'].notnull()) &
+                                            (self.reference_points['v'].notnull()) &
+                                            (self.reference_points['x'].notnull()) &
+                                            (self.reference_points['z'].notnull()) &
+                                            (self.reference_points['y'].notnull())].copy()
+        print('so many valid rows: ', len(valid_rows_2D))
+        if len(valid_rows_2D) < 4:
+            raise ValueError("At least 4 reference points are required.")
+        
+        # Construct the matrix A.
+        A = []
+        for i, row in valid_rows_2D.iterrows():
+            u = row['u']
+            v = row['v']
+            x = row['x']
+            y = row['y']
+            A.append([u, v, 1, 0, 0, 0, -u*x, -v*x, -x])
+            A.append([0, 0, 0, u, v, 1, -u*y, -v*y, -y])
+        A = np.array(A)
+        print(A)
+        # Singular Value Decomposition to solve for the transformation matrix.
+        U, S, Vt = np.linalg.svd(A)
+        self.transformation_matrix_xy = Vt[-1].reshape(3, 3)
+        valid_rows_2D = valid_rows_2D.apply(calculateRMSE, transformation_matrix = self.transformation_matrix_xy, axis = 1)
+        print(self.transformation_matrix_xy)
+        #Update the original self.reference_points with the calculated RMSE
+        self.reference_points.update(valid_rows_2D)
+
+        #update the table widget
+        self.update_table_with_dataframe()
+
+
+    def fillEmptyXYDimensions(self):
+        transformation_matrix=self.transformation_matrix_xy
+        # select from all reference points only those which have valid float values in u and v columns and empty values in x and y columns.
+        valid_rows = self.reference_points[(self.reference_points['u'].notnull()) &
+                                             (self.reference_points['v'].notnull()) &
+                                                (self.reference_points['x'].isnull()) &
+                                                (self.reference_points['y'].isnull())].copy()
+        print(valid_rows)
+
+        # Check if there is a transformation matrix with 3x3 dimensions for XY-transformation.
+        if transformation_matrix.shape != (3, 3):
+            raise ValueError("Transformation matrix must be 3x3.")
+        # sel.reference_points is a pandas dataframe with columns u,v,x,y,z. Use the function transform_uv_to_real to fill in the empty x,y columns.
+
+        for i, row in valid_rows.iterrows():
+            u = row['u']
+            v = row['v']
+            uv_coords = np.array([[u, v]])
+            real_coords = transform_uv_to_real(uv_coords, transformation_matrix)
+            self.reference_points.loc[i, ['x', 'y']] = real_coords
+
+        # Update the table widget
+        self.update_table_with_dataframe()
 
     @pyqtSlot()
     def export_mesh(self):
@@ -544,11 +696,8 @@ class GeoReferencer(QMainWindow):
 
     @pyqtSlot()
     def create_plane_and_box_with_corners_action(self):
-        if not self.real_world_coordinates:
-            print("No reference points available.")
-            return
 
-        self.create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
+        self.create_plane_and_box_with_corners()
         return self
 
 
@@ -585,33 +734,23 @@ class GeoReferencer(QMainWindow):
 
         else:
             # Store clicked image coordinates
-            new_point = {'u': u, 'v': v, 'x': np.nan, 'y': np.nan, 'z': np.nan, 'rmse': np.nan}
+            new_point = {'u': u, 'v': v, 'x': None, 'y': None, 'z': None, 'rmse': None}
 
             # Prompt user for real-world coordinates
-            coords, ok = QInputDialog.getText(self, "Input", "Enter real-world coordinates (x, y, z):")
+            coords, ok = QInputDialog.getText(self, "Input", "Enter real-world coordinates x, y, z with comma-seperator:")
 
             if ok and coords:
                 coords_list = coords.split(',')
                 if len(coords_list) != 3:
                     print("Invalid coordinates.")
                     return
-                rw_x, rw_y, rw_z = map(float, coords_list)
-                new_point['x'] = float(rw_x)
-                new_point['y'] = float(rw_y)
-                new_point['z'] = float(rw_z)
+                # replace empty strings in coords_list with None.
+                coords_list = [float(coord.strip()) if coord.strip() else None for coord in coords_list]
+                new_point['x'] = coords_list[0]
+                new_point['y'] = coords_list[1]
+                new_point['z'] = coords_list[2]
 
                 self.reference_points = pd.concat([self.reference_points, pd.DataFrame([new_point])], ignore_index=True)
-
-                # Draw a point on the image where the user clicked
-                #draw = ImageDraw.Draw(self.image)
-                #draw.ellipse([(x-3, y-3), (x+3, y+3)], fill='red')
-
-                # Update the image
-                #qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
-                #pixmap = QPixmap.fromImage(qim)
-                #self.scene.clear()
-                #self.scene.addPixmap(pixmap)
-                #self.view.setScene(self.scene)
         self.update_table_with_dataframe()
         self.update_reference_and_corner_points_on_canvas()
         
@@ -643,36 +782,25 @@ class GeoReferencer(QMainWindow):
         self.view.setScene(self.scene)
     
     def on_table_cell_double_clicked(self, row, column):
-        if column in ['u','v']:  # Assuming u,v is column 1
+        if column in [1,2]:  # Assuming u,v is column 1
             self.editing_uv_for_row = row  # Create this attribute in __init__
             #self.view.scene().removeItem(self.reference_points[]  # Assuming you store QGraphicsItem for each point
 
     def on_table_cell_changed(self, row, column):
         value = self.table.item(row, column).text()
-        self.reference_points.iat[row, column] = value  # Update DataFrame
+        print(f"Cell ({row}, {column}) changed to {value}")
+        if value == "":
+            self.reference_points.iloc[row, column] = None
+        if column == 0:
+            self.reference_points.iloc[row, column] = str(value)
+        if column > 0 and value != "":
+            self.reference_points.iloc[row, column] = float(value)
+        #except ValueError:
+            #self.table.item(row, column).setText("")  # Reset the cell to empty if the value is invalid
+
         self.update_reference_and_corner_points_on_canvas()
 
 
-    @pyqtSlot()
-    def save_reference_points(self):
-        if not self.image_coordinates or not self.real_world_coordinates:
-            print("No reference points to save.")
-            return
-
-        # Preparing the data to be saved
-        data = {
-            'image_coordinates': self.image_coordinates,
-            'real_world_coordinates': self.real_world_coordinates
-        }
-
-        # Propose a default filename as the input image name with .json extension
-        default_filename = self.image_path.rsplit('.', 1)[0] + '.json'
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Reference Points", default_filename, "JSON files (*.json);;All Files (*)")
-
-        if filepath:
-            with open(filepath, 'w') as file:
-                json.dump(data, file)
-            print(f"Reference points saved to {filepath}")
 
 
 
@@ -744,32 +872,41 @@ class GeoReferencer(QMainWindow):
     def view_in_3d(self):
         # Create a PointCloud object from the reference points
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.real_world_coordinates)
+        valid_rows = self.reference_points[(self.reference_points['z'].notnull()) &
+                                        (self.reference_points['x'].notnull()) &
+                                        (self.reference_points['y'].notnull())].copy()
+        
+
+        pcd.points = o3d.utility.Vector3dVector(np.array(valid_rows[['x', 'y', 'z']]))
+        print(np.asarray(pcd.points))
 
         # Check if the PointCloud has normals, if not compute them
-        if not pcd.has_normals():
-            pcd.estimate_normals()
+        #if not pcd.has_normals():
+            #pcd.estimate_normals()
 
         # Visualization objects
         vis_objects = [pcd]
 
         # If a mesh exists, add it to the visualization
-        if hasattr(self, 'mesh') and self.mesh.vertices:
-            vis_objects.append(self.mesh)
+        #if hasattr(self, 'mesh') :
+            #vis_objects.append(self.mesh)
 
         o3d.visualization.draw_geometries(vis_objects)
     
 
 
-    def create_plane_and_box_with_corners(self, image_points, ref_points, image_path, image):
-        ref_points = np.array(ref_points)
-        image_points = np.array(image_points)
-        T = compute_projective_transformation(image_points, ref_points)
-        img = o3d.io.read_image(image_path)
+    def create_plane_and_box_with_corners(self):
+
+        img = o3d.io.read_image(self.image_path)
         img_width, img_height = np.asarray(img).shape[1], np.asarray(img).shape[0]
+        #select from reference points only the rows that have valid float values not None nor Nan in the columns x,y,z.
+        valid_rows = self.reference_points[(self.reference_points['x'].notnull()) &
+                                             (self.reference_points['y'].notnull()) &
+                                                (self.reference_points['z'].notnull())].copy()
+        
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(ref_points)
+        pcd.points = o3d.utility.Vector3dVector(np.array(valid_rows[['x', 'y', 'z']]))
 
         plane_model, inliers = pcd.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=100)
         [a, b, c, d] = plane_model
@@ -778,13 +915,15 @@ class GeoReferencer(QMainWindow):
         normal = np.array([a, b, c])
         normal = normal / np.linalg.norm(normal) 
         print(f"Plane normal: {normal}")
+        corner_uv_coords = np.array([[0, 0], [img_width, 0], [0, img_height], [img_width, img_height]])
+        corner_xyz_coords = transform_uv_to_real(corner_uv_coords, self.transformation_matrix_xyz)
 
-        image_corners_xyz = transform_image_corners(image, T)
+        image_corners_xyz = corner_xyz_coords
         corner_pcd = o3d.geometry.PointCloud()
         corner_pcd.points = o3d.utility.Vector3dVector(image_corners_xyz)
         extruded_image_corners = copy.deepcopy(corner_pcd).translate((-self.config_data['frame_thickness']* normal[0], -self.config_data['frame_thickness'] * normal[1], -self.config_data['frame_thickness'] * normal[2]), relative=True)
 
-        normals_for_ref = np.tile(normal, (len(ref_points), 1))
+        normals_for_ref = np.tile(normal, (len(valid_rows), 1))
         pcd.normals = o3d.utility.Vector3dVector(normals_for_ref)
 
         normals_for_corner = np.tile(normal, (len(image_corners_xyz), 1))
@@ -868,9 +1007,6 @@ class GeoReferencer(QMainWindow):
             face_vertices = np.asarray(box_mesh.triangles)[target_face_idx]
             unique_vertices.update(face_vertices)
 
-        # Transform and normalize vertices
-        img = o3d.io.read_image(image_path)
-        img_width, img_height = np.asarray(img).shape[1], np.asarray(img).shape[0]
 
         # Create a mapping of vertex indices to their UV coordinates
         vertex_to_uv = {}
@@ -878,7 +1014,7 @@ class GeoReferencer(QMainWindow):
         for vert_idx, vert in enumerate(box_mesh.vertices):
             if vert_idx in unique_vertices:
                 xyz = np.asarray(vert)
-                uv = transform_real_to_uv(np.array([xyz]), T)[0]
+                uv = transform_real_to_uv(np.array([xyz]), self.transformation_matrix_xyz)[0]
                 u_normalized = uv[0] / img_width
                 v_normalized =  (uv[1] / img_height)
                 vertex_to_uv[vert_idx] = [u_normalized, v_normalized]
@@ -895,7 +1031,6 @@ class GeoReferencer(QMainWindow):
 
         # Assign the UV coordinates to the mesh
         box_mesh.triangle_uvs = o3d.utility.Vector2dVector(triangle_uv_coords)
-    
 
         # Apply the texture
 
@@ -916,15 +1051,11 @@ class GeoReferencer(QMainWindow):
         #vis.create_window()
         # Store the mesh in the instance variable
         self.mesh = box_mesh
-        o3d.visualization.draw([{'name': 'box', 'geometry': box_mesh, 'material': material}, frame, {'name': 'refpoints', 'geometry': pcd, 'material': material, 'point_show_normal': True}])
-        
+        o3d.visualization.draw([{'name': 'box', 'geometry': box_mesh, 'material': material}, frame, {'name': 'refpoints', 'geometry': pcd, 'material': material, 'point_show_normal': True}]) 
 
         # Add the point cloud
         #vis.add_geometry(pcd)
 
-
-        
-        
         return box_pcd_utm, box_mesh
 
 
@@ -947,6 +1078,8 @@ class GeoReferencer(QMainWindow):
 
         # Draw points
         for i, row in self.reference_points.iterrows():
+            if row['u'] is None or row['v'] is None:
+                continue
 
             # Original user-input points
             self.view.draw_reference_point(float(row['u']), float(row['v']), color=Qt.red)
@@ -958,21 +1091,3 @@ class GeoReferencer(QMainWindow):
         # Draw corner points in green
         #for corner in corners_uv:
             #self.view.draw_reference_point(corner[0], corner[1], color=Qt.green)
-
-        
-    def calculate_transformation(self):
-        if len(self.reference_points) < 4:
-            print("At least 4 reference points are required.")
-            return
-
-        # Compute the transformation matrix
-        uv_coords = self.reference_points[['u', 'v']].to_numpy()
-        xyz_coords = self.reference_points[['x', 'y', 'z']].to_numpy()
-        self.transformation_matrix = compute_projective_transformation(uv_coords, xyz_coords)
-
-        # Compute transformed UV coordinates and calculate RMSE
-        transformed_real_coords = transform_uv_to_real(uv_coords, self.transformation_matrix)
-        for i, (trans, real) in enumerate(zip(transformed_real_coords, xyz_coords)):
-            rmse = np.sqrt(np.sum((trans - real)**2))
-            self.reference_points.at[i, 'rmse'] = rmse
-            self.table.setItem(i, 6, QTableWidgetItem(f"{rmse:.4f}"))  # Assuming RMSE is the 7th column
