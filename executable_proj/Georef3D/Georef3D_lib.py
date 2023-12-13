@@ -1,17 +1,48 @@
+#### This development was interrupted on the 12.12.23 by the reviewers asnswer to a paper. ####
+## State of the development: The latest goal was to introduce segment anything for producing polygons from the image. GUI for the polygons has been implemented. 
+## A new geopandas dataframe has been introduced dependencies on geopandas rasterio etc have been installed but not checked. The environment is georef3d_v3.
+
+
 import json
+from pathlib import Path
 import numpy as np
 import open3d as o3d
 import open3d.visualization.rendering as rendering
 import pandas as pd
+import torch
+from segment_anything_hq import sam_model_registry, SamPredictor
 from PIL import Image, ImageDraw
+import cv2
+print(cv2.__version__)
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsScene, QVBoxLayout, QPushButton,
-                             QWidget, QFileDialog, QLabel, QTableWidget, QTableWidgetItem, 
+                             QWidget, QFileDialog, QLabel, QTableWidget, QTabWidget, QTableWidgetItem, 
                              QHeaderView, QInputDialog, QMenuBar, QMenu, QAction, QGraphicsEllipseItem, QGraphicsLineItem, QDialog, QComboBox,  QHBoxLayout, QCheckBox, QLineEdit, QSizePolicy, QSpacerItem, QSplitter)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QBrush
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
+
 import copy
 
+
+def loadSAMpredictor():
+    sam_checkpoint = "C:/Users/mhaibt/Downloads/sam_hq_vit_h.pth"
+    model_type = "vit_h"
+
+    device = "cuda"
+
+    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    sam.to(device=device)
+
+    predictor = SamPredictor(sam)
+    return predictor
+
+def scaleimage(image, scale_percent):
+    # Downscale image
+    width = int(image.shape[1] * scale_percent / 100)
+    height = int(image.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    image_downscaled = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+    return image_downscaled
 
 def calculateRMSE(valid_row, transformation_matrix):
     if transformation_matrix.shape == (4, 4):
@@ -354,11 +385,14 @@ class GeoReferencer(QMainWindow):
         self.config_data = {}
         self.image = None
         self.original_image = None
-        self.image_path = ""
+        self.image_path = None
         self.reference_points = pd.DataFrame()
+        self.segmentation_points = pd.DataFrame()
+        self.segmentation_polygons = gpd.GeoDataFrame()
         #self.reference_points = self.reference_points.astype({'name': 'str'  ,'u': 'float', 'v': 'float', 'x': 'float', 'y': 'float', 'z': 'float', 'rmse': 'float'})
         self.mesh = None
         self.editing_uv_for_row = None
+        self.segmentationmode = False
 
 
         self.config_file = "config.json" 
@@ -417,60 +451,89 @@ class GeoReferencer(QMainWindow):
         self.view.setScene(self.scene)
         layout.addWidget(self.view)
 
-        # Reference table
+
+        # Create the QTabWidget for the reference points and polygon data
+        self.data_widget = QTabWidget(self)
+        # Create a widget and layout for the Reference Points tab
+        ref_points_widget = QWidget()
+        ref_points_layout = QVBoxLayout(ref_points_widget)
+        self.data_widget.addTab(ref_points_widget, "Reference Points")
+        # Create a widget and layout for the Polygon Data tab
+        polygon_data_widget = QWidget()
+        polygon_data_layout = QVBoxLayout(polygon_data_widget)
+        self.data_widget.addTab(polygon_data_widget, "Polygon Data")
+
+        # Create a splitter for graphics view and data_widget
+        splitter = QSplitter(self)
+        splitter.setOrientation(Qt.Vertical)
+
+        # Add GraphicsView and data_widget to Splitter
+        splitter.addWidget(self.view)
+        splitter.addWidget(self.data_widget)
+
+        # Add Splitter to Layout
+        layout.addWidget(splitter)
+
+        # Tab 1: Reference Points Table
         self.table = QTableWidget(self)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setColumnCount(7)  # Change to 7 columns
         self.table.setHorizontalHeaderLabels(["name", "u", "v", "x", "y", "z", "rmse"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.table)
+        ref_points_layout.addWidget(self.table)
         self.table.cellChanged.connect(self.on_table_cell_changed)
         self.table.cellDoubleClicked.connect(self.on_table_cell_double_clicked)
 
+        # Tab 2: Polygon Data Table
+        self.polygon_data_table = QTableWidget(self)
+        # Configure this table as needed for polygon data
+        self.polygon_data_table.setColumnCount(3)  # Example: ID, Name, Geometry
+        self.polygon_data_table.setHorizontalHeaderLabels(["ID", "Name", "Geometry"])
+        polygon_data_layout.addWidget(self.polygon_data_table)
 
-        # Create a splitter
-        splitter = QSplitter(self)
-        splitter.setOrientation(Qt.Vertical)
 
-        # Add GraphicsView and Table to Splitter
-        splitter.addWidget(self.view)
-        splitter.addWidget(self.table)
 
-        # Add Splitter to Layout
-        layout.addWidget(splitter)
+
+
+
+
+
         
         # Buttons
+        self.segmentationmode_button = QPushButton("Segmentationmode", self)
+        self.segmentationmode_button.clicked.connect(self.segmentationmode_action)
+        polygon_data_layout.addWidget(self.segmentationmode_button)
 
         self.calc_transform_buttonXY = QPushButton("Calculate Transformation XY", self)
         self.calc_transform_buttonXY.clicked.connect(self.compute_projective_transformation_xy)
-        layout.addWidget(self.calc_transform_buttonXY)
+        ref_points_layout.addWidget(self.calc_transform_buttonXY)
 
         self.calc_transform_buttonXYZ = QPushButton("Calculate Transformation XYZ", self)
         self.calc_transform_buttonXYZ.clicked.connect(self.compute_projective_transformation_xyz)
-        layout.addWidget(self.calc_transform_buttonXYZ)
+        ref_points_layout.addWidget(self.calc_transform_buttonXYZ)
 
         # Add a button for a function that conducts the transformation and fills in x,y,z from u,v. 
         self.fillEmptyXYDimensions_button = QPushButton("fillEmptyXYDimensions", self)
         self.fillEmptyXYDimensions_button.clicked.connect(self.fillEmptyXYDimensions)
-        layout.addWidget(self.fillEmptyXYDimensions_button)
+        ref_points_layout.addWidget(self.fillEmptyXYDimensions_button)
 
         self.view_3d_button = QPushButton("View in 3D", self)
         self.view_3d_button.clicked.connect(self.view_in_3d)
-        layout.addWidget(self.view_3d_button)
+        ref_points_layout.addWidget(self.view_3d_button)
 
         self.reset_button = QPushButton("Reset", self)
         self.reset_button.clicked.connect(self.reset_image)
-        layout.addWidget(self.reset_button)
+        ref_points_layout.addWidget(self.reset_button)
 
         # Add a button to create the plane and box from reference points
         self.create_plane_box_button = QPushButton("Create Plane and Box", self)
         self.create_plane_box_button.clicked.connect(self.create_plane_and_box_with_corners_action)
-        layout.addWidget(self.create_plane_box_button)
+        ref_points_layout.addWidget(self.create_plane_box_button)
 
         self.textured_mesh_button = QPushButton("Create Textured Mesh", self)
         self.textured_mesh_button.clicked.connect(self.create_textured_mesh)
-        layout.addWidget(self.textured_mesh_button)
+        ref_points_layout.addWidget(self.textured_mesh_button)
 
         self.setCentralWidget(central_widget)
         self.setGeometry(100, 100, 800, 600)
@@ -546,7 +609,7 @@ class GeoReferencer(QMainWindow):
             print("No reference points to save.")
             return
 
-        default_filename = self.image_path.rsplit('.', 1)[0] + '.json'
+        default_filename = self.image_path.parent / f"{self.image_path.stem}_reference_points.json"
         filepath, _ = QFileDialog.getSaveFileName(self, "Save Reference Points", default_filename, "JSON files (*.json);;All Files (*)")
         #referencepoints = {'reference_points': self.reference_points.to_dict(orient='records')}
         records = self.reference_points.to_dict(orient='records')
@@ -557,6 +620,37 @@ class GeoReferencer(QMainWindow):
                 json.dump(records, file)
             print(f"Reference points saved to {filepath}")
 
+
+
+    @pyqtSlot()
+    def segmentationmode_action(self):
+        # select from reference points only the rows that have valid float values not None nor Nan in the columns u,v,x,y,z.
+        valid_rows_3D = self.reference_points[(self.reference_points['u'].notnull()) &
+                                           (self.reference_points['v'].notnull()) &
+                                           (self.reference_points['x'].notnull()) &
+                                           (self.reference_points['y'].notnull()) &
+                                           (self.reference_points['z'].notnull())].copy()        
+        # this action manages the segmentation mode. The Segmentation mode provides the functionality to initalize SAM and segment the image based on input coordinates from the canavas click.
+        # at first sam needs to be initalized and the predictors for the image need to be calculated
+        predictor = loadSAMpredictor()
+        predictor.set_image(self.image)
+        # open the segmentationmode widget
+        # get the coordinates from clicking on canavas
+        self.segmentationmode = True
+        
+        masks, scores, logits = predictor.predict(
+            point_coords=input_points ,
+            point_labels=input_label,
+            box=input_box[None, :],
+            multimask_output=False,
+        )
+        h, w = masks.shape[-2:]
+        mask_image = masks.reshape(h, w)
+        tempTiff = self.image_path.parent / "tempTiff.tif"
+
+        outputimage = self.image_path.parent / "mask.tif"
+
+    
 
 
 
@@ -690,6 +784,7 @@ class GeoReferencer(QMainWindow):
 
         # Export the mesh
         #texture = self.original_image if self.original_image else None  # Use the original image as texture
+        print('filepath: ', filepath)
         o3d.io.write_triangle_mesh(filepath, export_mesh)
         #export_textured_mesh(self.mesh, texture, filepath)
         print(f"Mesh exported to {filepath}")
@@ -731,6 +826,10 @@ class GeoReferencer(QMainWindow):
             self.reference_points.loc[self.editing_uv_for_row, 'u'] = u
             self.reference_points.loc[self.editing_uv_for_row, 'v'] = v
             delattr(self, 'editing_uv_for_row')
+        elif self.segmentationmode:
+            self.segmentation_points = pd.concat([self.segmentation_points, pd.DataFrame([[u, v, self.segpointstate]])], ignore_index=True)
+
+
 
         else:
             # Store clicked image coordinates
@@ -764,11 +863,12 @@ class GeoReferencer(QMainWindow):
     def load_image(self):
         ## developer setup
         self.image_path = self.ask_for_image_file()
+        self.image_path = Path(self.image_path)
         #self.image_path = "C:/Users/tronc/Nextcloud/Uruk/WES_paleoenvi/URUK_ERT/Uruk_2023_03_18_Profile_11_SN_Schlumberger_cut.jpeg"
         if not self.image_path:
             return
 
-        self.image = Image.open(self.image_path).convert('RGBA')
+        self.image = cv2.imread(str(self.image_path), cv2.IMREAD_UNCHANGED)
         self.original_image = self.image.copy()
 
         # Update label
@@ -820,57 +920,28 @@ class GeoReferencer(QMainWindow):
 
     @pyqtSlot()
     def create_textured_mesh(self):
-        if not self.real_world_coordinates:
-            print("No reference points available.")
-            return
-
-        # 1. Call create_plane_and_box_with_corners to get the point cloud
-        box_pcd_utm, box = create_plane_and_box_with_corners(self.image_coordinates, self.real_world_coordinates, self.image_path, self.original_image)
-        #box_pcd_utm.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=100, max_nn=10))
-        hull, _ =box_pcd_utm.compute_convex_hull(joggle_inputs=True)
+        valid_rows = self.reference_points[(self.reference_points['x'].notnull()) &
+                                             (self.reference_points['y'].notnull()) &
+                                                (self.reference_points['z'].notnull())].copy()
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(np.array(valid_rows[['x', 'y', 'z']]))
+        pcd.estimate_normals()
+        hull, _ =pcd.compute_convex_hull(joggle_inputs=True)
         #o3d.visualization.draw_geometries([box_pcd_utm, hull ], mesh_show_wireframe=True, point_show_normal=True)
         print("Number of points:", len(hull.vertices))
         print("Number of triangles:", len(hull.triangles))
+        self.mesh = hull
+        # For visualization using the material
+        material = rendering.MaterialRecord()
+        material.shader = 'defaultLit'
+        #material.albedo_img = img
+        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=self.mesh.get_center())
+        frame.translate((10, 10, 20))
+        o3d.visualization.draw([{'name': 'box', 'geometry': self.mesh, 'material': material}, frame, {'name': 'refpoints', 'geometry': pcd, 'material': material, 'point_show_normal': True}]) 
 
-        # 2. Create a triangle mesh using the Poisson reconstruction method
-        depth = 8  # You can adjust these parameters based on your requirements
-        scale = 4
-        mesh = hull
-
-
-        # Check if the mesh is valid
-        if not mesh.vertices:
-            print("Mesh generation failed. Please ensure there are enough reference points and they are well-distributed.")
-            return
-
-        print("Number of vertices:", len(mesh.vertices))
-        
-
-        #self.mesh = mesh
-        # Visualize the mesh
-        mesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
-        mesh.compute_vertex_normals()
-        mesh.compute_triangle_normals()
-        mesh.compute_uvatlas()
-        #size = 512, gutter = 1.0, max_stretch = 0.1666666716337204, parallel_partitions  = 1, nthreads  = 0
-        # Generate UV coordinates from image_coordinates
-        uv_coordinates = np.array(self.image_coordinates, dtype=np.float64)
-        uv_coordinates[:, 0] /= float(self.image.width)   # Normalize U coordinates
-        uv_coordinates[:, 1] = 1.0 - uv_coordinates[:, 1] / float(self.image.height)  # Normalize V coordinates and flip vertically
-        
-        # Assign UV coordinates to the mesh
-        mesh.triangle_uvs = o3d.utility.Vector2dVector(uv_coordinates)
-        
-        # Read the image as a texture
-        texture = o3d.io.read_image(self.image_path)
-        
-        # Assign texture to the mesh
-        mesh.textures = [texture]
-        o3d.visualization.draw_geometries([mesh, box_pcd_utm], mesh_show_wireframe=True, point_show_normal=True)
- 
     
     def view_in_3d(self):
-        # Create a PointCloud object from the reference points
+        # Create a PointCloud object from the reference 
         pcd = o3d.geometry.PointCloud()
         valid_rows = self.reference_points[(self.reference_points['z'].notnull()) &
                                         (self.reference_points['x'].notnull()) &
@@ -1091,3 +1162,4 @@ class GeoReferencer(QMainWindow):
         # Draw corner points in green
         #for corner in corners_uv:
             #self.view.draw_reference_point(corner[0], corner[1], color=Qt.green)
+
