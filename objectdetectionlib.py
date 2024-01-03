@@ -30,7 +30,8 @@ import torch
 #import skimage.data as data
 #import skimage.segmentation as seg
 #import skimage.filters as filters
-#from skimage import io
+#from skimage import ioSamPre
+
 #import skimage.draw as draw
 #import skimage.color as color
 
