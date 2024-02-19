@@ -7,7 +7,7 @@ importlib.reload(my_module)
 
 unreal.log('How are You?')
 
-config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_sedimentcores.json')
+config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_UrukModel.json')
 meshdf = UE5lib.provide_meshdf(config['meshfolder'])
 print(meshdf)
 for index, mesh in meshdf.iterrows():
@@ -16,8 +16,8 @@ for index, mesh in meshdf.iterrows():
     UE5lib.write_mtl(mtldf_modified, mesh['MTL File'])
     #print(mtldf)
     texturestemname = UE5lib.get_texturestemname(mesh['Texture Files'])
-    #print(texturestemname)
-    options = UE5lib.build_import_options(texturestemname)
+    print(texturestemname)
+    options = UE5lib.build_import_options(texturestemname, config['UEbasematerialpath'])
     print(options.get_editor_property('static_mesh_import_data'))
     
     tasks = UE5lib.build_import_tasks(mesh['OBJ File'], mesh['Texture Files'], config['UEdestination'], options)

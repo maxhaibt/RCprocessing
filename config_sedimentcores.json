@@ -58,6 +58,7 @@
     "devimage_format": ".png",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/Cores/multiple4",
-    "UEdestination": "/Game/WES_paleoenvi/cores/"
+    "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/Cores/uruk28",
+    "UEdestination": "/Game/WES_paleoenvi/cores/",
+    "UEbasematerialpath": "/Game/WES_paleoenvi/cores/basematerial_sedimentcore"
 }

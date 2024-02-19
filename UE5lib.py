@@ -50,11 +50,20 @@ def provide_meshdf(folder_path):
             other_files = []
 
             # Find associated files with the same stem name
-            associated_files = [f for f in all_files if f.startswith(stem_name)]
+            associated_files = []
+            for f in all_files:
+                print(f.split('.')[0])
+                print(stem_name)
+                if f.startswith(stem_name) or stem_name.startswith(f.split('.')[0]):
+                    associated_files.append(f)
+              
+           
             for assoc_file in associated_files:
+                print(assoc_file)
                 if assoc_file.endswith('.mtl'):
                     mtl_file = os.path.join(folder_path, assoc_file)
                 elif any(assoc_file.endswith(ext) for ext in texture_extensions):
+                    
                     texture_files.append(os.path.join(folder_path, assoc_file))
                 else:
                     other_files.append(os.path.join(folder_path, assoc_file))
@@ -157,7 +166,7 @@ def write_mtl(modified_mtl_df, original_file_path):
 
 
 
-def build_import_options(texturestemname: str):
+def build_import_options(texturestemname: str, basematerial):
     options = unreal.FbxImportUI()
     #print(options.get_editor_property('static_mesh_import_data'))
     # unreal.FbxImportUI
@@ -171,7 +180,7 @@ def build_import_options(texturestemname: str):
     options.static_mesh_import_data.set_editor_properties({'import_uniform_scale': 100.0})
     options.static_mesh_import_data.set_editor_properties({'build_nanite': True}) 
     # Texture options
-    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath('/Game/WES_paleoenvi/cores/basematerial_sedimentcore')})     
+    options.texture_import_data.set_editor_properties({'base_material_name': unreal.SoftObjectPath(basematerial)})     
     options.texture_import_data.set_editor_properties({'material_search_location': unreal.MaterialSearchLocation.LOCAL})
     print(texturestemname)
     options.texture_import_data.set_editor_properties({'base_diffuse_texture_name' : texturestemname})                                        
@@ -303,8 +312,8 @@ def set_udim_texture_to_material_instance(mesh_import_path: str, material_instan
 def post_import_process(mesh_import_path: str, texture_stem_name: str, destination_path: str):
     # Names based on your provided paths and names
     material_instance_name = mesh_import_path + "_material"
-    oldname =  "defaultMat_ncl1_1"
-    rename_created_material_instance("/Game/WES_paleoenvi/cores/",oldname, material_instance_name)
+    oldname =  "defaultMat"
+    rename_created_material_instance(destination_path,oldname, material_instance_name)
     texture_name = destination_path + "/" + texture_stem_name  # Change the path if it's different
     material_path = destination_path + "/" + material_instance_name
     mesh_path = destination_path + "/" + mesh_import_path

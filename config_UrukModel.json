@@ -51,7 +51,8 @@
     "devimage_format": ".JPG",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
-    "meshfolder": "D:/OBJ_ue5",
-    "UEdestination": "/Game/UrukModel/"
+    "meshfolder": "D:/OBJ_ue5/extra1",
+    "UEdestination": "/Game/3DTiles/",
+    "UEbasematerialpath": "/Game/3DTiles/Base"
 }
     
