@@ -1,0 +1,115 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+#include "JsonParsingNestedArrays.generated.h"
+
+// Define a struct to hold an array of FVector2D
+USTRUCT(BlueprintType)
+struct FCoordinateArray
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FVector2D> Coordinates;
+};
+
+// Define a struct to hold an array of FCoordinateArray
+USTRUCT(BlueprintType)
+struct FCoordinateArrayArray
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FCoordinateArray> CoordinateArrays;
+};
+
+/**
+ *
+ */
+UCLASS()
+class URUKVR_API UJsonParsingNestedArrays : public UBlueprintFunctionLibrary
+{
+    GENERATED_BODY()
+
+public:
+    // Function declaration with custom structs as return type
+    UFUNCTION(BlueprintCallable, Category = "JSON Parsing")
+    static TArray<FCoordinateArrayArray> ParseMultiPolygonCoordinates(const FString& JsonString);
+};
+
+
+
+#include "JsonParsingNestedArrays.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+
+TArray<FCoordinateArrayArray> UJsonParsingNestedArrays::ParseMultiPolygonCoordinates(const FString& JsonString)
+{
+    TArray<FCoordinateArrayArray> Result;
+
+    // Create a JSON Reader from the string
+    TSharedPtr<FJsonObject> JsonObject;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+
+    // Deserialize the JSON data
+    if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
+    {
+        // Access the "coordinates" array in the JSON
+        const TArray<TSharedPtr<FJsonValue>>* OuterArrayPtr = nullptr;  // Corrected to const pointer
+        if (JsonObject->TryGetArrayField(TEXT("coordinates"), OuterArrayPtr) && OuterArrayPtr)
+        {
+            // Dereference the pointer to work with the actual TArray
+            const TArray<TSharedPtr<FJsonValue>>& OuterArray = *OuterArrayPtr; // Corrected to const reference
+
+            // Loop over the first level array
+            for (const TSharedPtr<FJsonValue>& OuterValue : OuterArray) // Added const for safety
+            {
+                FCoordinateArrayArray SecondLevelStruct;
+
+                // Ensure that the value is an array before proceeding
+                if (OuterValue->Type == EJson::Array)
+                {
+                    // Loop over the second level array
+                    for (const TSharedPtr<FJsonValue>& InnerValue : OuterValue->AsArray()) // Added const for safety
+                    {
+                        FCoordinateArray ThirdLevelStruct;
+
+                        // Ensure that the value is an array before proceeding
+                        if (InnerValue->Type == EJson::Array)
+                        {
+                            // Loop over the coordinate pairs
+                            for (const TSharedPtr<FJsonValue>& CoordPairValue : InnerValue->AsArray()) // Added const for safety
+                            {
+                                // Ensure we have a pair of coordinates before proceeding
+                                if (CoordPairValue->Type == EJson::Array)
+                                {
+                                    const TArray<TSharedPtr<FJsonValue>>& Coordinates = CoordPairValue->AsArray(); // Corrected to const reference
+                                    if (Coordinates.Num() == 2)
+                                    {
+                                        // Convert JSON Values to float and create FVector2D
+                                        double X = Coordinates[0]->AsNumber();
+                                        double Y = Coordinates[1]->AsNumber();
+                                        ThirdLevelStruct.Coordinates.Add(FVector2D(X, Y));
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add the third level struct to the second level struct
+                        SecondLevelStruct.CoordinateArrays.Add(ThirdLevelStruct);
+                    }
+                }
+
+                // Add the second level struct to the result
+                Result.Add(SecondLevelStruct);
+            }
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to parse JSON"));
+    }
+
+    return Result;
+}
