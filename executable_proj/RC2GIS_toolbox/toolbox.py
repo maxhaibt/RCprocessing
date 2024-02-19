@@ -1,6 +1,6 @@
 
-import pyproj
-pyproj.datadir.set_data_dir('C:/Users/mhaibt/Anaconda3/envs/orthobox_env/Library/share/proj/')
+#import pyproj
+#pyproj.datadir.set_data_dir('C:/Users/mhaibt/Anaconda3/envs/orthobox_env/Library/share/proj/')
 import numpy as np
 import geopandas as gpd
 from pathlib import Path
@@ -12,6 +12,14 @@ import gdal
 from shapely.geometry import LineString
 from tkinter import filedialog, messagebox
 import rasterio
+import rasterio._shim
+import rasterio._base
+import rasterio.rpc
+import rasterio.control
+import rasterio.crs
+import rasterio.sample
+import rasterio.vrt
+import rasterio._features
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 from affine import Affine
 import threading
@@ -145,7 +153,7 @@ def profilemappping_to_gpkg(raster_files, output_gpkg, root):
     gdf_orthobox.to_file(output_gpkg, layer='orthoboxes', driver='GPKG')
      
 
-def process_sideview_files(file_paths, progress, status, should_continue):
+def process_sideview_files(file_paths, progress, status, should_continue, root):
     # Global list to store metadata about processed images
     processed_images = []
     num_files = len(file_paths)
