@@ -2,15 +2,11 @@
     "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
     "messagepath": "E:/WES_paleoenvi/utils",
-    "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/WES_paleoenvi/cores/URUK27",
-    "excludescanids": ["URUK15_5to6m","URUK15_6to7m","URUK15_7to8m","URUK15_8to9m","URUK15_9to10m"
-    ,"URUK15_10to11m"
-    ,"URUK15_11to12m"
-    ,"URUK15_12to13m"
-    ,"URUK15_1to2m"
-    ,"URUK15_2to3m"
-    ,"URUK15_3to4m"
-    ,"URUK15_4to5m"],
+    "workspace": "Z:/UrukLarge/WES_paleoenvi/URUK26",
+    "excludescanids": ["URUK26_0to1m","URUK26_1to2m","URUK26_2to3m","URUK26_3to4m","URUK26_4to5m"
+    ,"URUK26_5to6m"
+    ,"URUK26_6to7m"
+    ,"URUK26_8to9m"],
     "alignmentreport_template": "E:/GitHub/RCprocessingAlignmentView.html",
     "overwrite_dev-img": false,
     "overwrite_imagelist": true,
@@ -27,17 +23,17 @@
     "imageparams": "variable",
     "imageparamsfile": "E:/testSAM/nice_tablets/fixCamparams.json",
     "calibratecameraparameters": false,
-    "sedimentcores_selectstraight": true,
+    "sedimentcores_selectstraight": false,
     "cameraparamsconfig": "E:/WES_paleoenvi/utils/export_camregistrationconfig.xml",
     "align_qs3d": false,
-    "quick_mosaic": true,
+    "quick_mosaic": false,
     "simplify_settings": "E:/WES_paleoenvi/utils/simplify100k_sedimentcore.xml",
     "quick_mosaic_exportsettings": "E:/WES_paleoenvi/utils/orthomosaic_sedimentcore.xml",
-    "reconstruct": false,
-    "texture": false,
+    "reconstruct": true,
+    "texture": true,
     "orthomosaic": false,
-    "overwrite_all_rcproj": true,
-    "overwrite_alignment_rcproj": true,
+    "overwrite_all_rcproj": false,
+    "overwrite_alignment_rcproj": false,
     "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment_sedimentcores.rccmd",
     "reconstructsettings": "E:/GitHub/RCprocessing/RCsettings_reconstruction.rccmd",
     "constantrcbox":"",
@@ -47,7 +43,7 @@
     "constantgcps":"",
     "use_startpointtransformation": true,
     "GCPstartpointfile": "E:/WES_paleoenvi/utils/Uruk_2023-1_DGNSS_ERT_WESid_URUKcores.gpkg",
-    "start_rcbox": "E:/WES_paleoenvi/utils/sedimentcorebox.rcbox",
+    "start_rcbox": "E:/WES_paleoenvi/utils/sedimentcorebox24.rcbox",
     "use_gcps_1shot": false,
     "scaleobject_QS3D": false,
     "basegcps": "E:/WES_paleoenvi/utils/RKSframeCPs.csv",
