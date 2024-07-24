@@ -2,7 +2,7 @@
     "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
     "messagepath": "E:/WES_paleoenvi/utils",
-    "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/WES_paleoenvi/cores/URUK15",
+    "workspace": "K:/Iraq/UrukWarka_unstrukturiert/UrukLarge/WES_paleoenvi/cores/URUK27",
     "excludescanids": ["URUK15_5to6m","URUK15_6to7m","URUK15_7to8m","URUK15_8to9m","URUK15_9to10m"
     ,"URUK15_10to11m"
     ,"URUK15_11to12m"
@@ -33,9 +33,9 @@
     "quick_mosaic": true,
     "simplify_settings": "E:/WES_paleoenvi/utils/simplify100k_sedimentcore.xml",
     "quick_mosaic_exportsettings": "E:/WES_paleoenvi/utils/orthomosaic_sedimentcore.xml",
-    "reconstruct": true,
-    "texture": true,
-    "orthomosaic": true,
+    "reconstruct": false,
+    "texture": false,
+    "orthomosaic": false,
     "overwrite_all_rcproj": true,
     "overwrite_alignment_rcproj": true,
     "alignmentsettings": "E:/GitHub/RCprocessing/RCsettings_alignment_sedimentcores.rccmd",
@@ -53,9 +53,9 @@
     "basegcps": "E:/WES_paleoenvi/utils/RKSframeCPs.csv",
     "gcpsparamfile":"E:/WES_paleoenvi/utils/gcps_param_sedimentcore.xml",
     "constantpp3file":"E:/WES_paleoenvi/utils/DSC05902.dng.pp3",
-    "baseimageformat":"*.png",
+    "baseimageformat":"*.jpg",
     "devimage_param":" -b8 -tz ",
-    "devimage_format": ".png",
+    "devimage_format": ".jpg",
     "exportsettings1": "E:/WES_paleoenvi/utils/export_param_UTM2UE.xml",
     "exportname_prefix": "",
     "meshfolder": "D:/3DPhotogrammetry/WES_paleoenvi/Cores/uruk28",

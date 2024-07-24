@@ -177,7 +177,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan['scannerlogfile'] = [file for file in scan['scan_dir'].rglob("00-*")]
             imagelist = []
             for file in scan['scan_dir'].rglob(imageformat):
-                if not file.stem.endswith('.mask'):
+                if not file.stem.endswith('.mask') or not file.stem.startswith('URUK'):
                     image_dict = {}
                     image_dict['rawimg_path']= Path(file)
                     mask = image_dict['rawimg_path'].with_name(image_dict['rawimg_path'].name + '.mask.png')
