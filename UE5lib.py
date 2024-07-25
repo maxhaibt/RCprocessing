@@ -217,7 +217,7 @@ def build_import_tasks(filename: str, texture_files: list, destination_path: str
     # Identify UDIM-texture files and create tasks for each
     texture_factory = build_texture_factory()
     
-    for file in texture_files:
+    for file in [texture_files[0]]:
         
         texture_task = unreal.AssetImportTask()
         texture_task.set_editor_property("automated", True)

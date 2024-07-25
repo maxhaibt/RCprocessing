@@ -1,13 +1,13 @@
-import unreal
+import unreal as ue
 import UE5lib as UE5lib
 import importlib
 from pathlib import Path
 my_module = importlib.import_module('UE5lib')
 importlib.reload(my_module)
 
-unreal.log('How are You?')
+ue.log('How are You?')
 
-config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_UrukModel.json')
+config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_ShatalNil.json')
 meshdf = UE5lib.provide_meshdf(config['meshfolder'])
 print(meshdf)
 for index, mesh in meshdf.iterrows():
