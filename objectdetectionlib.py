@@ -24,8 +24,13 @@ from subprocess import check_output
 from sklearn.cluster import KMeans
 import sys
 sys.path.append("..")
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+#from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 import torch
+print(torch.__version__)
+print(torch.cuda.is_available())
+print(torch.version.cuda) 
+device = torch.device("cuda")
+torch.Tensor(1).to(device)
 
 #import skimage.data as data
 #import skimage.segmentation as seg
@@ -709,8 +714,6 @@ def extract_histogram(series, image, maskfield='segmentation'): # applied to a d
 
 import numpy as np
 
-import numpy as np
-
 def plothistograms(series, outpath):
     # Plot the histograms
     fig, axs = plt.subplots(1, 3, figsize=(34, 5))
@@ -1081,7 +1084,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         object_mask = scaleimage(rgbmask, 2000)
         kernel = np.ones((64,64),np.uint8)
         mask= cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, kernel)
-        series['maskimg_path'] = series['rawimg_path'].with_name(series['rawimg_path'].name + '.mask.png')
+        series['maskimg_path'] = series['dev-img_path'].with_name(series['dev-img_path'].name + '.mask.png')
         print(f"rest-processing time : {time.time() - start_time:.4f} seconds")
         cv2.imwrite(str(series['maskimg_path']),mask)
         print(f"writing time: {time.time() - start_time :.4f} seconds")
@@ -1089,7 +1092,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #show_anns(masks2, str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')))
         finalmaskdf = pd.DataFrame([{'segmentation': mask, 'class': 'object'}])
         if config['maskobject_QS3D_visualized']:
-            show_mask_asoutline(finalmaskdf, original, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.final.png')), labelfield='class')
+            show_mask_asoutline(finalmaskdf, original, outpath = str(series['dev-img_path'].with_name(series['dev-img_path'].name + '.final.png')), labelfield='class')
         #plt.figure( figsize=(10,10))
         #plt.imshow(original)
         #show_mask(mask, plt.gca())
@@ -1099,3 +1102,81 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
 
     return series
+
+
+def colorcorrection(imageseries, colorreference, outputfolderpath, inputrawimagepathfield='rawimg_path', outputdevimagepathfield='dev-img_path'):
+    outfile = outputfolderpath / Path(str(imageseries[inputrawimagepathfield].stem) + config['devimage_format'])
+
+    for camref in colorreference['whitebalance']:
+        if camref['cam_id'] == imageseries['cam_id']:
+            whitepoint = camref['pos_color_019']
+            blackpoint = camref['pos_color_024']
+
+    if not outfile.is_file() or (outfile.is_file() and config['overwrite_dev-img']):
+        if imageseries[inputrawimagepathfield].is_file():
+            img = cv2.imread(str(imageseries[inputrawimagepathfield]))
+            # Convert to LAB color space
+            lab_img = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+
+            # Extracting the average LAB color from a patch around the white point
+            x, y = whitepoint
+            lab_patch = lab_img[y-10:y+10, x-10:x+10]
+            lab_avg_white = np.mean(lab_patch, axis=(0, 1))
+            # Extracting the LAB color from the black point
+            x, y = blackpoint
+            lab_patch = lab_img[y-10:y+10, x-10:x+10]
+            lab_avg_black = np.mean(lab_patch, axis=(0, 1))
+
+
+            # Target LAB values for a neutral white patch
+            white_color = np.uint8([[[254, 254, 254]]])
+            white_color = cv2.cvtColor(white_color, cv2.COLOR_RGB2LAB)
+            print('LAB average: ', lab_avg_white)
+            print('LAB white: ', white_color)
+
+            # Target LAB values for a neutral black patch
+            black_color = np.uint8([[[30, 30, 30]]])
+            black_color = cv2.cvtColor(black_color, cv2.COLOR_RGB2LAB)
+            print('LAB average black: ', lab_avg_black)
+
+            # Calculate correction factors
+            # get the first channel of the white color and divide it by the average of the white color
+
+            L_scale = (white_color[0][0][0] / lab_avg_white[0])
+            A_shift = white_color[0][0][1] / lab_avg_white[1]
+            B_shift = white_color[0][0][2] / lab_avg_white[2]
+            print('Correction factors: ', L_scale, A_shift, B_shift)
+
+            # Calculate correction factors black point
+            L_scale_black = (black_color[0][0][0] / lab_avg_black[0])
+            A_shift_black = black_color[0][0][1] / lab_avg_black[1]
+            B_shift_black = black_color[0][0][2] / lab_avg_black[2]
+
+            # Print and compare the correction factors
+            print('Correction factors black: ', L_scale_black, A_shift_black, B_shift_black)
+            print('Correction factors: ', L_scale, A_shift, B_shift)
+
+            #average # white and black correction factors
+            #L_scale = (L_scale + L_scale_black) / 2
+            #A_shift = (A_shift + A_shift_black) / 2
+            #B_shift = (B_shift + B_shift_black) / 2
+
+            #blend the correction factors
+            blendfactor = 0.7
+
+            # Apply correction factors in LAB space
+            lab_img[:, :, 0] = np.clip(lab_img[:, :, 0] * L_scale * blendfactor, 0, 255)
+            lab_img[:, :, 1] = np.clip(lab_img[:, :, 1] * A_shift, 0, 255)
+            lab_img[:, :, 2] = np.clip(lab_img[:, :, 2] * B_shift, 0, 255)
+
+            # Convert back to RGB
+            corrected_img = cv2.cvtColor(lab_img.astype(np.uint8), cv2.COLOR_LAB2BGR)
+            
+            # Write the corrected image
+            cv2.imwrite(str(outfile), corrected_img)
+            if outfile.is_file():
+                print(f"Color corrected image saved to {outfile}")
+                imageseries[outputdevimagepathfield] = outfile
+
+    return imageseries
+

@@ -108,7 +108,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('E:/GitHub/RCprocessing/config_sedimentcores.json')
+config = loadconfigs('E:/GitHub/RCprocessing/config_scanner.json')
 
 
 def sort_image_series(folderpath, timedelta=60):
