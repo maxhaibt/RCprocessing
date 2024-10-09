@@ -7,7 +7,7 @@ importlib.reload(my_module)
 
 ue.log('How are You?')
 
-config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_ShatalNil.json')
+config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_sedimentcores.json')
 meshdf = UE5lib.provide_meshdf(config['meshfolder'])
 print(meshdf)
 for index, mesh in meshdf.iterrows():

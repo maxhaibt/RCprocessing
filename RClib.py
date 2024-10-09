@@ -108,7 +108,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('E:/GitHub/RCprocessing/config_sedimentcores.json')
+config = loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_sedimentcores.json')
 
 
 def sort_image_series(folderpath, timedelta=60):
@@ -359,7 +359,8 @@ def read_rcbox(rcbox_path):
         rcbox['globalCoordinateSystem'] = global_coord_system
         rcbox['globalCoordinateSystemName'] = global_coord_system_name
         print(rcbox)
-
+    else:
+        raise FileNotFoundError(f"File not found: {rcbox_path}")
     return rcbox
 
 
