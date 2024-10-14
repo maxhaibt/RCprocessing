@@ -124,6 +124,42 @@ def getDocsIfContainStringInIdentifier(api, search_string):
         print(f"Exception during querying: {str(e)}")
         return []
 
+
+def create_actors_in_content_browser(resources, base_path="Content/idaifield_resources"):
+    """
+    Create actors in the Unreal Engine content browser based on the provided resources.
+
+    Args:
+        resources (list): A list of resources containing data to create actors.
+        base_path (str): The path in the content browser where the actors will be stored.
+    """
+    for resource in resources:
+        # Construct the name for the actor based on the resource identifier
+        actor_name = resource['resource'].get('identifier', 'DefaultActorName')
+
+        # Create a new actor (assumed to be a custom actor class)
+        actor_class = ue.EditorAssetLibrary.load_asset("/Game/PathToYourCustomActor")  # Adjust the path as necessary
+        if actor_class is None:
+            ue.log_error("Actor class could not be loaded!")
+            continue
+
+        # Spawn the actor in the content browser
+        asset_tools = ue.AssetToolsHelpers.get_asset_tools()
+        task = ue.AssetImportTask()
+        task.set_editor_property("automated", True)
+        task.set_editor_property("destination_path", base_path)
+        task.set_editor_property("filename", f"{base_path}/{actor_name}")
+        task.set_editor_property("replace_existing", True)
+        task.set_editor_property("options", None)  # Provide options if needed
+        task.set_editor_property("factory", actor_class)
+
+        # Perform the import
+        asset_tools.import_asset_tasks([task])
+
+        ue.log(f"Created actor: {actor_name} at {base_path}")
+
+
+
 def filter_docs_by_category(docs, search_category):
     """
     Filter documents based on whether resource.category contains the search_category string.
@@ -194,30 +230,81 @@ def extract_polygon_geometries(resource):
     Extract polygon geometries from the resources.
 
     Args:
-        resources (list): A list of resources containing geometry information.
+        resource (dict): A resource containing geometry information.
 
     Returns:
-        list: A list of Y-coordinates from all polygon vertices.
+        tuple: A list of Y-coordinates from all polygon vertices and a flag indicating if vertical extent extraction is needed.
     """
     y_coordinates = []
-
+    needs_vertical_extent_extraction = False
 
     if isinstance(resource, dict) and 'resource' in resource:
         ue.log('Resource Is a dict')
         try:
-            if isinstance(resource['resource'], dict) and 'geometry' in resource['resource']:
-                ue.log('Geometry exists')
-                geometry = resource['resource']['geometry']
-                if geometry['type'] == 'Polygon':
-                    coordinates = geometry['coordinates'][0]  # Get the first ring of the polygon
-                    for vertex in coordinates:
-                        y_coordinates.append(vertex[1])  # Append the Y-coordinate
+            if isinstance(resource['resource'], dict):
+                if 'geometry' in resource['resource']:
+                    ue.log('Geometry exists')
+                    geometry = resource['resource']['geometry']
+                    if geometry['type'] == 'Polygon':
+                        coordinates = geometry['coordinates'][0]  # Get the first ring of the polygon
+                        if coordinates:  # Check if coordinates are not empty
+                            for vertex in coordinates:
+                                y_coordinates.append(vertex[1])  # Append the Y-coordinate
+                        else:
+                            ue.log_warning("Coordinates are empty, vertical extent extraction needed.")
+                            needs_vertical_extent_extraction = True
+                    else:
+                        ue.log_warning("Geometry type is not Polygon, vertical extent extraction needed.")
+                        needs_vertical_extent_extraction = True
+                else:
+                    ue.log_warning("No geometry field found, vertical extent extraction needed.")
+                    needs_vertical_extent_extraction = True
         except KeyError as e:
             ue.log_error(f"KeyError: {str(e)}")
         except Exception as e:
             ue.log_error(f"An error occurred: {str(e)}")
 
-    return y_coordinates
+    return y_coordinates, needs_vertical_extent_extraction
+
+def extract_verticalextent(resource):
+    """
+    Extract vertical extent values from the resource.
+
+    Args:
+        resource (dict): A resource containing vertical extent information.
+
+    Returns:
+        tuple: A tuple containing the min and max values of the vertical extent,
+               or (None, None) if not found.
+    """
+    if isinstance(resource, dict) and 'resource' in resource:
+        ue.log('Resource Is a dict')
+        try:
+            if isinstance(resource['resource'], dict):
+                # Check for 'dimensionVerticalExtent' field
+                if 'dimensionVerticalExtent' in resource['resource']:
+                    ue.log('Vertical extent exists')
+                    vertical_extent_list = resource['resource']['dimensionVerticalExtent']
+
+                    # Ensure it's a list and has at least one element
+                    if isinstance(vertical_extent_list, list) and vertical_extent_list:
+                        vertical_extent = vertical_extent_list[0]  # Assuming we want the first entry
+                        
+                        # Extract the min and max values
+                        top_value = vertical_extent.get('inputValue')
+                        bottom_value = vertical_extent.get('inputRangeEndValue')
+
+                        return top_value, bottom_value
+                    else:
+                        ue.log_warning("Vertical extent is not a valid list or is empty")
+                else:
+                    ue.log_warning("No vertical extent field found in resource")
+        except KeyError as e:
+            ue.log_error(f"KeyError: {str(e)}")
+        except Exception as e:
+            ue.log_error(f"An error occurred: {str(e)}")
+
+    return 0, 0  # Return default values if vertical extent is not found
 
 def calculate_min_max_y(y_coordinates):
     """
@@ -251,49 +338,36 @@ def height_translate_UTM2UrukVR(min_y, max_y):
     if min_y is None or max_y is None:
         return None, None  # Return None if inputs are invalid
 
-    translated_min_y = (min_y - 12.2076) * 100  # Convert to cm
-    translated_max_y = (max_y - 12.2076) * 100  # Convert to cm
+    bottom_value= (min_y - 12.2076) * 100  # Convert to cm
+    top_value = (max_y - 12.2076) * 100  # Convert to cm
 
-    return translated_min_y, translated_max_y
+    return top_value, bottom_value
 
-def create_cylinder_at_position(top_center_position, translated_min_y, translated_max_y, radius=20.0):
+
+
+def calculate_cylinder_position(top_center_position, top_value, bottom_value):
     """
-    Create a cylinder actor in Unreal Engine at the specified position, with height defined by translated Y values.
+    Calculate the adjusted positions for creating a cylinder based on the top center position and vertical extent values.
 
     Args:
-        top_center_position (Vector): The world position where the cylinder will be created.
-        translated_min_y (float): The minimum Y value to set as the cylinder's base.
-        translated_max_y (float): The maximum Y value to set as the cylinder's top.
-        radius (float): The radius of the cylinder. Default is 20 cm.
+        top_center_position (Vector): The world position of the top center.
+        min_y (float): The minimum Y value.
+        max_y (float): The maximum Y value.
+
+    Returns:
+        tuple: The adjusted min and max Y positions for the cylinder.
     """
-    # Calculate the height of the cylinder
-    height = translated_max_y - translated_min_y
+    if top_center_position is None or top_value is None or bottom_value is None:
+        ue.log_error("Invalid inputs for calculating cylinder position.")
+        return None, None
 
-    # Log the creation parameters
-    ue.log(f"Creating cylinder at position: {top_center_position}, height: {height}, radius: {radius}")
+    # Calculate the actual positions by subtracting the vertical extent from the top center Z value
+    actual_top_value = top_center_position.z - top_value
+    actual_bottom_value = top_center_position.z - bottom_value
 
-    # Create a cylinder actor
-    cylinder_actor = ue.EditorLevelLibrary.spawn_actor_from_class(ue.StaticMeshActor, top_center_position)
+    ue.log(f"Adjusted cylinder positions - Min Y: {actual_top_value}, Max Y: {actual_bottom_value}")
 
-    # Create a cylinder mesh
-    cylinder = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cylinder")
-
-    # Access the static mesh component directly
-    static_mesh_component = cylinder_actor.static_mesh_component
-
-    # Set the static mesh to the cylinder
-    static_mesh_component.set_static_mesh(cylinder)
-
-    # Set the actor location at the desired height
-    new_location = ue.Vector(top_center_position.x, top_center_position.y, translated_min_y + (height / 2.0))
-    cylinder_actor.set_actor_location(new_location, False, None)
-
-    # Set the scale of the cylinder to match the radius and height
-    scale = ue.Vector(radius / 100.0, radius / 100.0, height / 100.0)  # Convert cm to Unreal scale
-    static_mesh_component.set_relative_scale3d(scale)
-
-
-
+    return actual_top_value, actual_bottom_value
 
 
 
@@ -648,7 +722,7 @@ def get_top_center_of_0to1m_mesh(actors_list):
         actors_list (list): A list of StaticMeshActor objects to search within.
 
     Returns:
-        tuple: The actor's name and the top-center world position, or None if no match is found.
+        Vector: The world position of the top center, or None if no match is found.
     """
     # Iterate through the list of provided actors
     for actor in actors_list:
@@ -657,6 +731,7 @@ def get_top_center_of_0to1m_mesh(actors_list):
         
         # Check if the actor's name contains "0to1m"
         if "0to1m" in actor_name.lower():
+            ue.log(f"0to1: {actor_name}")
             # Get the static mesh component
             static_mesh_component = actor.get_component_by_class(ue.StaticMeshComponent)
             
@@ -664,14 +739,246 @@ def get_top_center_of_0to1m_mesh(actors_list):
                 # Get the bounding box of the static mesh in local space
                 bounds_origin, bounds_box_extent = static_mesh_component.get_local_bounds()
                 
-                # Calculate the local top-center position
-                top_center_local = ue.Vector(bounds_origin.x, bounds_origin.y, bounds_origin.z + bounds_box_extent.z)
-                ue.log(top_center_local)
+                # Calculate the relative extent by subtracting the origin from the extent
+                relative_extent = ue.Vector(
+                    bounds_box_extent.x - bounds_origin.x,
+                    bounds_box_extent.y - bounds_origin.y,
+                    bounds_box_extent.z - bounds_origin.z
+                )
+
+                # Calculate the full height based on the bounding box extent
+                full_height = relative_extent.z * 2  # Full height in Unreal's units
+
+                # Adjust the top-center position based on the bounds origin
+                top_center_local = ue.Vector(bounds_origin.x, bounds_origin.y, bounds_origin.z + relative_extent.z)
+                ue.log(f"Bounds Origin: {bounds_origin}, Extent: {bounds_box_extent}, Relative Extent: {relative_extent}, Top Center Local: {top_center_local}")
+
                 # Convert local top-center position to world space by applying the world transform
                 top_center_world = static_mesh_component.get_world_transform().transform_location(top_center_local)
-                ue.log(top_center_world)
-                # Return the actor's name and its top-center world position
-                return top_center_world
+                ue.log(f"Top Center World: {top_center_world}")
+
+                # Create a white cone at the top center position
+                create_cone_at_position(top_center_world)  # Call the new function here
+
+                # Return the top-center world position
+                return top_center_world  # Return the world position instead of bounds_origin
     
     # If no actor with "0to1m" is found, return None
     return None
+    
+def create_cone_at_position(top_center_position, height=100.0, radius=20.0):
+    """
+    Create a cone actor in Unreal Engine at the specified position.
+
+    Args:
+        top_center_position (Vector): The world position where the cone will be created.
+        height (float): The height of the cone. Default is 100 units.
+        radius (float): The radius of the cone's base. Default is 20 units.
+    """
+    # Log the creation parameters
+    ue.log(f"Creating cone at position: {top_center_position}, height: {height}, radius: {radius}")
+
+    # Create a cone actor
+    cone_actor = ue.EditorLevelLibrary.spawn_actor_from_class(ue.StaticMeshActor, top_center_position)
+
+    # Create a cone mesh
+    cone = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cone")
+
+    # Access the static mesh component directly
+    static_mesh_component = cone_actor.static_mesh_component
+
+    # Set the static mesh to the cone
+    static_mesh_component.set_static_mesh(cone)
+
+    # Set the actor location at the specified position (the peak of the cone)
+    cone_actor.set_actor_location(top_center_position, False, None)
+
+    # Set the scale of the cone to match the radius and height
+    scale = ue.Vector(radius / 100.0, radius / 100.0, height / 100.0)  # Convert to Unreal scale
+    static_mesh_component.set_relative_scale3d(scale)
+
+    # Set the material of the cone to white
+    white_material = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Materials/WhiteMaterial")  # Replace with your white material asset path
+    if white_material:
+        static_mesh_component.set_material(0, white_material)
+    else:
+        ue.log_warning("White material not found, the cone will not have the correct material.")
+
+
+def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_value, resource_identifier, radius=20.0):
+    """
+    Create a dynamic cylinder mesh using Geometry Script at a specified world location and save it as an asset.
+
+    Args:
+        top_center_position (Vector): The world position where the cylinder will be created.
+        top_value (float): The maximum Y value to set as the cylinder's top.
+        bottom_value (float): The minimum Y value to set as the cylinder's base.
+        resource_identifier (str): The identifier string to set as the display name for the cylinder.
+        radius (float): The radius of the cylinder. Default is 20 cm.
+    
+    Returns:
+        None
+    """
+    # Calculate the height of the cylinder
+    height = top_value - bottom_value
+
+    # Log the creation parameters
+    ue.log(f"Creating dynamic cylinder with height: {height}, radius: {radius}")
+
+    # Create a DynamicMesh object to hold the cylinder geometry
+    target_mesh = ue.DynamicMesh()
+
+    # Create a primitive options object for the cylinder
+    primitive_options = ue.GeometryScriptPrimitiveOptions()
+    
+    # Create a transform for the cylinder at the desired world location
+    transform = ue.Transform()
+    transform.translation = top_center_position # This sets the world position for the cylinder
+
+    # Append the cylinder to the target mesh
+    ue.GeometryScript_Primitives.append_cylinder(
+        target_mesh,
+        primitive_options,
+        transform,
+        radius=radius,
+        height=height,
+        radial_steps=12,  # Adjust as needed
+        height_steps=0,
+        capped=True,
+        origin=ue.GeometryScriptPrimitiveOriginMode.BASE,
+    )
+
+    # Create a Static Mesh Asset from the Dynamic Mesh
+    #tatic_mesh_asset = ue.StaticMesh()  # Initialize a StaticMesh instance
+    static_mesh_name = f"{resource_identifier}"
+    static_mesh_path = f"/Game/idaifield_resources/"  # Define the asset path
+    # Create AssetTools
+    asset_tools = ue.AssetToolsHelpers.get_asset_tools()
+
+    # Create a new static mesh asset
+    static_mesh_asset = asset_tools.create_asset(static_mesh_name, static_mesh_path, ue.StaticMesh.static_class(), None)
+
+    # Check if the asset was created successfully
+    if static_mesh_asset is None:
+        ue.log_error(f"Failed to create static mesh asset: {static_mesh_name}")
+        return None
+
+    # Create the asset tools for saving the static mesh
+    # Create a new Static Mesh asset
+    options = create_copy_mesh_options()
+    lod = ue.GeometryScriptMeshWriteLOD(False, 0)
+    outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(target_mesh, static_mesh_asset, options=options, target_lod = lod)
+    ue.log(f"Copy mesh outcome: {outcome}")
+
+
+
+def create_copy_mesh_options():
+    # Create an instance of GeometryScriptCopyMeshToAssetOptions
+    copy_options = ue.GeometryScriptCopyMeshToAssetOptions()
+
+    # Set the properties as needed
+    copy_options.enable_recompute_normals = True        # Enable recomputation of normals
+    copy_options.enable_recompute_tangents = True       # Enable recomputation of tangents
+    copy_options.enable_remove_degenerates = True       # Enable removal of degenerate triangles
+    copy_options.replace_materials = False               # Do not replace materials
+    copy_options.new_materials = []                      # No new materials
+    copy_options.new_material_slot_names = []            # No new material slot names
+    copy_options.apply_nanite_settings = False           # Do not apply Nanite settings
+    copy_options.nanite_settings = ue.GeometryScriptNaniteOptions()  # Default Nanite options
+    copy_options.new_nanite_settings = ue.MeshNaniteSettings()        # Default new Nanite settings
+    copy_options.emit_transaction = False                # Do not emit a transaction
+    copy_options.defer_mesh_post_edit_change = False    # Do not defer post-edit change
+
+    return copy_options
+
+
+def create_static_mesh_with_options(asset_name, asset_path):
+    # Create an instance of InterchangeStaticMeshFactoryNode
+    factory_node = ue.InterchangeStaticMeshFactoryNode()
+
+    # Initialize the static mesh node with unique ID, display label, and asset class
+    unique_id = "my_unique_id"  # Change this to a unique identifier
+    display_label = asset_name
+    asset_class = "StaticMesh"  # Type of asset to create
+
+    factory_node.initialize_static_mesh_node(unique_id, display_label, asset_class)
+
+    # Set some basic properties (customize these as needed)
+    factory_node.set_custom_build_nanite(True)  # Enable Nanite
+    factory_node.set_custom_generate_lightmap_u_vs(True)  # Enable lightmap UV generation
+    factory_node.set_custom_max_lumen_mesh_cards(12)  # Set max Lumen mesh cards
+
+    # Now, create the static mesh asset
+    # Assume you have a valid Dynamic Mesh instance `dynamic_mesh`
+    dynamic_mesh = ue.DynamicMesh()  # Replace with your dynamic mesh creation logic
+
+    # Create a new static mesh asset
+    static_mesh_asset = ue.AssetToolsHelpers.get_asset_tools().create_asset(
+        asset_name, asset_path, ue.StaticMesh, factory_node
+    )
+
+    # Copy the mesh data from the dynamic mesh to the static mesh
+    outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(dynamic_mesh, static_mesh_asset, factory_node, 0)
+
+    # Check if the operation was successful
+    if outcome == ue.GeometryScriptOutcomePins.SUCCESS:
+        ue.log(f"Static mesh '{asset_name}' created successfully in '{asset_path}'.")
+    else:
+        ue.log_error(f"Failed to create static mesh '{asset_name}'. Outcome: {outcome}")
+
+
+
+
+def transform_and_save_static_mesh(actor, resource_identifier, new_location):
+    """
+    Transforms the specified static mesh to local coordinates, saves it to the content browser,
+    removes the original static mesh from the level, and creates a ResourceActor instance.
+
+    Args:
+        actor (StaticMeshActor): The StaticMeshActor instance to transform and save.
+        resource_identifier (str): The identifier for naming the asset.
+        new_location (Vector): The world position where the static mesh will be transformed.
+    """
+    # Get the static mesh component
+    static_mesh_component = actor.get_component_by_class(ue.StaticMeshComponent)
+
+    if static_mesh_component:
+        # Get the current world location and transform it to local coordinates
+        world_location = static_mesh_component.get_world_location()
+        actor.set_actor_location(new_location, False, None)
+
+        # Calculate the difference to convert world to local coordinates
+        offset = new_location - world_location
+
+        # Set the new local location
+        static_mesh_component.set_relative_location(offset)
+
+        # Save the static mesh to the content browser
+        mesh_path = f"/Game/idaifield_resources/{resource_identifier}_Cylinder"
+        mesh_asset = ue.EditorAssetLibrary.save_asset(mesh_path, static_mesh_component)
+
+        if mesh_asset:
+            ue.log(f"Saved static mesh '{resource_identifier}_Cylinder' to {mesh_path}")
+
+        # Remove the static mesh from the level
+        ue.EditorLevelLibrary.destroy_actor(actor)
+
+        # Create a ResourceActor instance
+        resource_actor_class = ue.EditorAssetLibrary.load_asset("/Game/PathToYourResourceActorClass")  # Adjust the path
+        if resource_actor_class:
+            resource_actor = ue.EditorLevelLibrary.spawn_actor_from_class(resource_actor_class, new_location)
+            resource_actor.Identifier = resource_identifier
+
+            # Here you would call the parsing function to fill in other properties
+            # Assuming you have a parsing function set up
+            json_object = ...  # Get the JSON object related to this resource
+            UResourceParser.ParseResource(json_object, resource_actor)
+
+            ue.log(f"Created ResourceActor with identifier '{resource_identifier}' at {new_location}")
+        else:
+            ue.log_error(f"Failed to load ResourceActor class.")
+    else:
+        ue.log_warning(f"Actor '{actor.get_actor_label()}' does not have a StaticMeshComponent.")
+
+
+

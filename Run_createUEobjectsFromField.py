@@ -6,7 +6,7 @@ from pathlib import Path
 my_module = importlib.import_module('UE5lib')
 importlib.reload(my_module)
 
-search_string = "URUK32"
+search_string = "URUK33"
 ue.log(search_string)
 
 config = UE5lib.loadconfigs('E:/UEpythonutils/URUKVR_config.json')
@@ -26,16 +26,29 @@ api = UE5lib.couchDB_APIs(config)
 matching_docs = UE5lib.getDocsIfContainStringInIdentifier(api, search_string)
 sedimentcore_docs = UE5lib.filter_docs_by_category(matching_docs, "Sedimentcore")
 related_docs = UE5lib.get_related_docs_by_liesWithin(api, sedimentcore_docs)
+ue.log(related_docs)
 for doc in related_docs:
-    y_coordinates = UE5lib.extract_polygon_geometries(doc)
-    #next iteration if y_coordinates is empty
-    if not y_coordinates:
-        continue
-    ue.log(y_coordinates)
-    min_y, max_y = UE5lib.calculate_min_max_y(y_coordinates)
-    ue.log(f"min_y: {min_y}, max_y: {max_y}")
-    translated_min_y, translated_max_y = UE5lib.height_translate_UTM2UrukVR(min_y, max_y)
-    ue.log(f"trans_min_y: {translated_min_y}, trans_max_y: {translated_max_y}")
-    # Assuming top_center_positions is defined and represents the top-center position
-    UE5lib.create_cylinder_at_position(top_center_positions, translated_min_y, translated_max_y)
+    resource_identifier = doc['resource'].get('identifier') # Get the resource identifier
+    y_coordinates, needs_vertical_extent = UE5lib.extract_polygon_geometries(doc)
+    
+    if y_coordinates:
+        ue.log(y_coordinates)
+        min_y, max_y = UE5lib.calculate_min_max_y(y_coordinates)
+        top_value, bottom_value = UE5lib.height_translate_UTM2UrukVR(min_y, max_y)
+        ue.log(f"top_value: {top_value}, bottom_value: {bottom_value}")
 
+        # Create the cylinder with polygon coordinates
+        UE5lib.create_dynamic_cylinder_and_save(top_center_positions, top_value, bottom_value, resource_identifier)
+    elif needs_vertical_extent:
+        # Extract vertical extent since Y-coordinates were not found
+        top_value,bottom_value = UE5lib.extract_verticalextent(doc)
+        actual_top_value, actual_bottom_value = UE5lib.calculate_cylinder_position(top_center_positions,top_value, bottom_value)
+        
+        if actual_top_value is None or actual_bottom_value is None:
+            ue.log_warning("Vertical extent values are None, skipping cylinder creation.")
+            continue  # Skip if vertical extent values are not valid
+        
+
+        # Create the cylinder with vertical extent values
+        resource3DGeometry = UE5lib.create_dynamic_cylinder_and_save(top_center_positions, actual_top_value, actual_bottom_value, resource_identifier)
+        #UE5lib.transform_and_save_static_mesh(resource3DGeometry, resource_identifier=resource_identifier)
