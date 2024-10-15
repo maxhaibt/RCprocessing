@@ -38,7 +38,8 @@ for doc in related_docs:
         ue.log(f"top_value: {top_value}, bottom_value: {bottom_value}")
 
         # Create the cylinder with polygon coordinates
-        UE5lib.create_dynamic_cylinder_and_save(top_center_positions, top_value, bottom_value, resource_identifier)
+        resource3DGeometry =UE5lib.create_dynamic_cylinder_and_save(top_center_positions, top_value, bottom_value, resource_identifier)
+        UE5lib.spawn_resource_actor(resource3DGeometry, doc)
     elif needs_vertical_extent:
         # Extract vertical extent since Y-coordinates were not found
         top_value,bottom_value = UE5lib.extract_verticalextent(doc)
@@ -52,3 +53,4 @@ for doc in related_docs:
         # Create the cylinder with vertical extent values
         resource3DGeometry = UE5lib.create_dynamic_cylinder_and_save(top_center_positions, actual_top_value, actual_bottom_value, resource_identifier)
         #UE5lib.transform_and_save_static_mesh(resource3DGeometry, resource_identifier=resource_identifier)
+        UE5lib.spawn_resource_actor(resource3DGeometry, doc)

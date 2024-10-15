@@ -881,6 +881,7 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
     lod = ue.GeometryScriptMeshWriteLOD(False, 0)
     outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(target_mesh, static_mesh_asset, options=options, target_lod=lod)
     ue.log(f"Copy mesh outcome: {outcome}")
+    return static_mesh_asset
 
 
 
@@ -943,56 +944,82 @@ def create_static_mesh_with_options(asset_name, asset_path):
 
 
 
-def transform_and_save_static_mesh(actor, resource_identifier, new_location):
+
+def spawn_resource_actor(static_mesh_asset, doc):
     """
-    Transforms the specified static mesh to local coordinates, saves it to the content browser,
-    removes the original static mesh from the level, and creates a ResourceActor instance.
+    Create ResourceActor instances next to the static meshes and populate their properties with JSON data.
 
     Args:
-        actor (StaticMeshActor): The StaticMeshActor instance to transform and save.
-        resource_identifier (str): The identifier for naming the asset.
-        new_location (Vector): The world position where the static mesh will be transformed.
+        static_mesh_asset: The created static mesh asset.
+        resource: The resource JSON data to populate the actor.
     """
-    # Get the static mesh component
-    static_mesh_component = actor.get_component_by_class(ue.StaticMeshComponent)
+    resource = doc['resource']
+    # Load the ResourceActor class
+    resource_actor_asset = ue.EditorAssetLibrary.load_asset("/Game/idaifield_resources/ResourceActor")  # Adjust the path as necessary
+    if resource_actor_asset is None:
+        ue.log_error("ResourceActor asset could not be loaded!")
+        return
+    # Get the class from the asset
+    resource_actor_class = resource_actor_asset.generated_class()
+    if resource_actor_class is None:
+        ue.log_error("ResourceActor class could not be loaded!")
+        return
+    ue.log(f"ResourceActor class loaded: {resource_actor_class}")
 
-    if static_mesh_component:
-        # Get the current world location and transform it to local coordinates
-        world_location = static_mesh_component.get_world_location()
-        actor.set_actor_location(new_location, False, None)
 
-        # Calculate the difference to convert world to local coordinates
-        offset = new_location - world_location
 
-        # Set the new local location
-        static_mesh_component.set_relative_location(offset)
+    # Spawn the ResourceActor next to the static mesh
+    spawn_location = ue.Vector(0, 0, 0)  # You can adjust the spawn location as needed
+    resource_actor = ue.EditorLevelLibrary.spawn_actor_from_class(resource_actor_class, spawn_location)
+    resource_actor.set_actor_label(resource['identifier'])  # Set the actor label to the identifier
+    if resource_actor is None:
+        ue.log_error("Failed to spawn ResourceActor!")
+        return
 
-        # Save the static mesh to the content browser
-        mesh_path = f"/Game/idaifield_resources/{resource_identifier}_Cylinder"
-        mesh_asset = ue.EditorAssetLibrary.save_asset(mesh_path, static_mesh_component)
+    # Assign the static mesh to the ResourceActor
+    mesh_component = resource_actor.get_component_by_class(ue.StaticMeshComponent)
+    mesh_component.set_static_mesh(static_mesh_asset)
 
-        if mesh_asset:
-            ue.log(f"Saved static mesh '{resource_identifier}_Cylinder' to {mesh_path}")
+    # Populate the ResourceActor properties with JSON data
+    parse_resource(resource, resource_actor)
 
-        # Remove the static mesh from the level
-        ue.EditorLevelLibrary.destroy_actor(actor)
 
-        # Create a ResourceActor instance
-        resource_actor_class = ue.EditorAssetLibrary.load_asset("/Game/PathToYourResourceActorClass")  # Adjust the path
-        if resource_actor_class:
-            resource_actor = ue.EditorLevelLibrary.spawn_actor_from_class(resource_actor_class, new_location)
-            resource_actor.Identifier = resource_identifier
+    # Log the creation of the ResourceActor
+    ue.log(f"Created ResourceActor: {resource_actor.get_actor_label()} with static mesh: {static_mesh_asset.get_name()}")
 
-            # Here you would call the parsing function to fill in other properties
-            # Assuming you have a parsing function set up
-            json_object = ...  # Get the JSON object related to this resource
-            UResourceParser.ParseResource(json_object, resource_actor)
 
-            ue.log(f"Created ResourceActor with identifier '{resource_identifier}' at {new_location}")
-        else:
-            ue.log_error(f"Failed to load ResourceActor class.")
-    else:
-        ue.log_warning(f"Actor '{actor.get_actor_label()}' does not have a StaticMeshComponent.")
 
+def parse_resource(resource_json, resource_actor):
+    """
+    Parse resource JSON data and populate the ResourceActor instance.
+
+    Args:
+        resource_json (dict): The JSON data for the resource.
+        resource_actor (AResourceActor): The ResourceActor instance to populate.
+    """
+    # Ensure the resource_actor is valid
+    if resource_actor is None:
+        ue.log_error("ResourceActor reference is None!")
+        return
+
+    # Parse common attributes
+    if 'identifier' in resource_json:
+        resource_actor.set_editor_property("Identifier", resource_json['identifier'])
+    
+    if 'category' in resource_json:
+        resource_actor.set_editor_property("Category", resource_json['category'])
+    
+    if 'type' in resource_json:
+        resource_actor.set_editor_property("Category", resource_json['type'])
+    
+    if 'sampleType' in resource_json:
+        resource_actor.set_editor_property("SampleType", resource_json['sampleType'])
+    
+    if 'shortDescription' in resource_json:
+        resource_actor.set_editor_property("ShortDescription", resource_json['shortDescription'])
+    
+    if 'description' in resource_json:
+        resource_actor.set_editor_property("Description", resource_json['description'])
+    
 
 
