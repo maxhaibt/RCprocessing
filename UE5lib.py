@@ -239,9 +239,10 @@ def extract_polygon_geometries(resource):
     needs_vertical_extent_extraction = False
 
     if isinstance(resource, dict) and 'resource' in resource:
-        ue.log('Resource Is a dict')
+        ue.log('Resource is a dict')
         try:
             if isinstance(resource['resource'], dict):
+                # Check for geometry first
                 if 'geometry' in resource['resource']:
                     ue.log('Geometry exists')
                     geometry = resource['resource']['geometry']
@@ -259,12 +260,14 @@ def extract_polygon_geometries(resource):
                 else:
                     ue.log_warning("No geometry field found, vertical extent extraction needed.")
                     needs_vertical_extent_extraction = True
+
         except KeyError as e:
             ue.log_error(f"KeyError: {str(e)}")
         except Exception as e:
             ue.log_error(f"An error occurred: {str(e)}")
 
     return y_coordinates, needs_vertical_extent_extraction
+
 
 def extract_verticalextent(resource):
     """
@@ -278,7 +281,7 @@ def extract_verticalextent(resource):
                or (None, None) if not found.
     """
     if isinstance(resource, dict) and 'resource' in resource:
-        ue.log('Resource Is a dict')
+        ue.log('Resource is a dict')
         try:
             if isinstance(resource['resource'], dict):
                 # Check for 'dimensionVerticalExtent' field
@@ -297,14 +300,23 @@ def extract_verticalextent(resource):
                         return top_value, bottom_value
                     else:
                         ue.log_warning("Vertical extent is not a valid list or is empty")
+                
+                # Check for spatialLocation as a fallback
+                elif 'spatialLocation' in resource['resource']:
+                    ue.log('Using spatialLocation for vertical extent')
+                    spatial_location = resource['resource']['spatialLocation']
+                    top, bottom = map(float, spatial_location.split('-'))
+                    return top, bottom
                 else:
-                    ue.log_warning("No vertical extent field found in resource")
+                    ue.log_warning("No vertical extent or spatialLocation field found in resource")
         except KeyError as e:
             ue.log_error(f"KeyError: {str(e)}")
         except Exception as e:
             ue.log_error(f"An error occurred: {str(e)}")
 
-    return 0, 0  # Return default values if vertical extent is not found
+    return None, None  # Return None for both values if not found
+
+
 
 def calculate_min_max_y(y_coordinates):
     """
@@ -805,7 +817,7 @@ def create_cone_at_position(top_center_position, height=100.0, radius=20.0):
         ue.log_warning("White material not found, the cone will not have the correct material.")
 
 
-def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_value, resource_identifier, radius=20.0):
+def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_value, resource_identifier, radius=12.0):
     """
     Create a dynamic cylinder mesh using Geometry Script at a specified world location and save it as an asset.
 
@@ -833,7 +845,8 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
     
     # Create a transform for the cylinder at the desired world location
     transform = ue.Transform()
-    transform.translation = top_center_position # This sets the world position for the cylinder
+    # Adjust the Z-value to center the cylinder correctly
+    transform.translation = ue.Vector(top_center_position.x, top_center_position.y, bottom_value + (height / 2.0))  # Set Z to center the cylinder
 
     # Append the cylinder to the target mesh
     ue.GeometryScript_Primitives.append_cylinder(
@@ -845,12 +858,12 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
         radial_steps=12,  # Adjust as needed
         height_steps=0,
         capped=True,
-        origin=ue.GeometryScriptPrimitiveOriginMode.BASE,
+        origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
     )
 
     # Create a Static Mesh Asset from the Dynamic Mesh
-    #tatic_mesh_asset = ue.StaticMesh()  # Initialize a StaticMesh instance
-    static_mesh_name = f"{resource_identifier}"
+    # Replace spaces with underscores in the resource identifier for the asset name
+    static_mesh_name = resource_identifier.replace(' ', '_')
     static_mesh_path = f"/Game/idaifield_resources/"  # Define the asset path
     # Create AssetTools
     asset_tools = ue.AssetToolsHelpers.get_asset_tools()
@@ -863,12 +876,13 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
         ue.log_error(f"Failed to create static mesh asset: {static_mesh_name}")
         return None
 
-    # Create the asset tools for saving the static mesh
     # Create a new Static Mesh asset
     options = create_copy_mesh_options()
     lod = ue.GeometryScriptMeshWriteLOD(False, 0)
-    outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(target_mesh, static_mesh_asset, options=options, target_lod = lod)
+    outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(target_mesh, static_mesh_asset, options=options, target_lod=lod)
     ue.log(f"Copy mesh outcome: {outcome}")
+
+
 
 
 
