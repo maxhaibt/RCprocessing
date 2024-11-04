@@ -305,7 +305,7 @@ def extract_verticalextent(resource):
                 elif 'spatialLocation' in resource['resource']:
                     ue.log('Using spatialLocation for vertical extent')
                     spatial_location = resource['resource']['spatialLocation']
-                    top, bottom = map(float, spatial_location.split('-'))
+                    top, bottom = map(extract_number, spatial_location.split('-'))
                     return top, bottom
                 else:
                     ue.log_warning("No vertical extent or spatialLocation field found in resource")
@@ -316,7 +316,22 @@ def extract_verticalextent(resource):
 
     return None, None  # Return None for both values if not found
 
+def extract_number(value):
+    """
+    Extracts the first numeric value from a string, ignoring any letters.
 
+    Args:
+        value (str): The string from which to extract a number.
+
+    Returns:
+        float: The extracted number as a float, or None if no valid number is found.
+    """
+    if isinstance(value, str):
+        # Use regex to find the first numeric part in the string
+        match = re.search(r'[\d.]+', value)  # This matches integers and decimals
+        if match:
+            return float(match.group(0))  # Convert to float
+    return None  # Return None if not a valid string
 
 def calculate_min_max_y(y_coordinates):
     """
@@ -740,6 +755,8 @@ def get_top_center_of_0to1m_mesh(actors_list):
     for actor in actors_list:
         # Get the actor's display name
         actor_name = actor.get_actor_label()
+        # get from actor_name the substring until the first _ character
+        actor_name_short = actor_name.split('_')[0]
         
         # Check if the actor's name contains "0to1m"
         if "0to1m" in actor_name.lower():
@@ -770,7 +787,7 @@ def get_top_center_of_0to1m_mesh(actors_list):
                 ue.log(f"Top Center World: {top_center_world}")
 
                 # Create a white cone at the top center position
-                create_cone_at_position(top_center_world)  # Call the new function here
+                create_cone_at_position(top_center_world, height=100, radius=20, resource_identifier=actor_name_short)
 
                 # Return the top-center world position
                 return top_center_world  # Return the world position instead of bounds_origin
@@ -778,46 +795,75 @@ def get_top_center_of_0to1m_mesh(actors_list):
     # If no actor with "0to1m" is found, return None
     return None
     
-def create_cone_at_position(top_center_position, height=100.0, radius=20.0):
+def create_cone_at_position(top_center_position, height, radius, resource_identifier):
     """
-    Create a cone actor in Unreal Engine at the specified position.
+    Create a cone mesh using Geometry Script at a specified world location.
 
     Args:
-        top_center_position (Vector): The world position where the cone will be created.
-        height (float): The height of the cone. Default is 100 units.
-        radius (float): The radius of the cone's base. Default is 20 units.
+        top_center_position (Vector): The world position where the cone will be created (at the base).
+        height (float): The height of the cone.
+        radius (float): The radius of the cone at the base.
+        resource_identifier (str): The identifier string to set as the display name for the cone.
+
+    Returns:
+        StaticMeshAsset: The created static mesh asset for the cone.
     """
     # Log the creation parameters
-    ue.log(f"Creating cone at position: {top_center_position}, height: {height}, radius: {radius}")
+    ue.log(f"Creating cone with height: {height}, radius: {radius}")
 
-    # Create a cone actor
-    cone_actor = ue.EditorLevelLibrary.spawn_actor_from_class(ue.StaticMeshActor, top_center_position)
+    # Create a DynamicMesh object to hold the cone geometry
+    target_mesh = ue.DynamicMesh()
 
-    # Create a cone mesh
-    cone = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cone")
+    # Create a primitive options object for the cone
+    primitive_options = ue.GeometryScriptPrimitiveOptions()
 
-    # Access the static mesh component directly
-    static_mesh_component = cone_actor.static_mesh_component
+    # Create a transform for the cone at the desired world location
+    transform = ue.Transform()
+    offset = ue.Vector(6, 3, 0)
+    # Adjust the Z-value to center the cylinder correctly
+    transform.translation = ue.Vector(top_center_position.x, top_center_position.y,top_center_position.y) + offset
+    # Adjust the Z-value to set the base of the cone at the specified position
+    #transform.translation = ue.Vector(top_center_position.x, top_center_position.y, top_center_position.z)
 
-    # Set the static mesh to the cone
-    static_mesh_component.set_static_mesh(cone)
+    # Append the cone to the target mesh
+    ue.GeometryScript_Primitives.append_cone(
+        target_mesh,
+        primitive_options,
+        transform,
+        base_radius=20, 
+        top_radius=0.1000000,
+        height=height,
+        radial_steps=12,  # Adjust as needed
+        height_steps=0,
+        capped=True,
+        origin=ue.GeometryScriptPrimitiveOriginMode.BASE,  # Set the origin to the base
+    )
 
-    # Set the actor location at the specified position (the peak of the cone)
-    cone_actor.set_actor_location(top_center_position, False, None)
+    # Create a Static Mesh Asset from the Dynamic Mesh
+    # Replace spaces with underscores in the resource identifier for the asset name
+    static_mesh_name = resource_identifier.replace(' ', '_')
+    static_mesh_path = f"/Game/idaifield_resources/"  # Define the asset path
+    # Create AssetTools
+    asset_tools = ue.AssetToolsHelpers.get_asset_tools()
 
-    # Set the scale of the cone to match the radius and height
-    scale = ue.Vector(radius / 100.0, radius / 100.0, height / 100.0)  # Convert to Unreal scale
-    static_mesh_component.set_relative_scale3d(scale)
+    # Create a new static mesh asset
+    static_mesh_asset = asset_tools.create_asset(static_mesh_name, static_mesh_path, ue.StaticMesh.static_class(), None)
 
-    # Set the material of the cone to white
-    white_material = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Materials/WhiteMaterial")  # Replace with your white material asset path
-    if white_material:
-        static_mesh_component.set_material(0, white_material)
-    else:
-        ue.log_warning("White material not found, the cone will not have the correct material.")
+    # Check if the asset was created successfully
+    if static_mesh_asset is None:
+        ue.log_error(f"Failed to create static mesh asset: {static_mesh_name}")
+        return None
+
+    # Create a new Static Mesh asset
+    options = create_copy_mesh_options()
+    lod = ue.GeometryScriptMeshWriteLOD(False, 0)
+    outcome = ue.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(target_mesh, static_mesh_asset, options=options, target_lod=lod)
+    ue.log(f"Copy mesh outcome: {outcome}")
+
+    return static_mesh_asset
 
 
-def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_value, resource_identifier, radius=12.0):
+def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_value, resource_identifier, radius=3.0):
     """
     Create a dynamic cylinder mesh using Geometry Script at a specified world location and save it as an asset.
 
@@ -845,8 +891,10 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
     
     # Create a transform for the cylinder at the desired world location
     transform = ue.Transform()
+    # Offsetvector
+    offset = ue.Vector(6, 3, 0)
     # Adjust the Z-value to center the cylinder correctly
-    transform.translation = ue.Vector(top_center_position.x, top_center_position.y, bottom_value + (height / 2.0))  # Set Z to center the cylinder
+    transform.translation = ue.Vector(top_center_position.x, top_center_position.y, bottom_value + (height / 2.0)) + offset
 
     # Append the cylinder to the target mesh
     ue.GeometryScript_Primitives.append_cylinder(
@@ -855,7 +903,7 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
         transform,
         radius=radius,
         height=height,
-        radial_steps=12,  # Adjust as needed
+        radial_steps=60,  # Adjust as needed
         height_steps=0,
         capped=True,
         origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
@@ -941,7 +989,40 @@ def create_static_mesh_with_options(asset_name, asset_path):
     else:
         ue.log_error(f"Failed to create static mesh '{asset_name}'. Outcome: {outcome}")
 
+def create_dynamic_material_instance(static_mesh_actor, material_path):
+    """
+    Create and assign a dynamic material instance to the static mesh component of the given actor.
 
+    Args:
+        static_mesh_actor: The actor to which the material will be assigned.
+        material_path: The path of the base material to create the dynamic instance from.
+    """
+    # Load the base material
+    base_material = ue.EditorAssetLibrary.load_asset(material_path)
+    
+    if base_material is None:
+        ue.log_error(f"Failed to load the material from {material_path}")
+        return
+
+    # Get the static mesh component of the actor
+    mesh_component = static_mesh_actor.get_component_by_class(ue.StaticMeshComponent)
+
+    if mesh_component is not None:
+        # Create a dynamic material instance
+        dynamic_material_instance = ue.MaterialLibrary.create_dynamic_material_instance(
+            static_mesh_actor,  # world_context_object
+            base_material  # parent material
+        )
+
+        if dynamic_material_instance is None:
+            ue.log_error("Failed to create dynamic material instance")
+            return
+        
+        # Assign the dynamic material instance to the first material slot
+        mesh_component.set_material(0, dynamic_material_instance)
+        ue.log(f"Dynamic material instance assigned to {static_mesh_actor.get_actor_label()}")
+    else:
+        ue.log_error("StaticMeshComponent not found in the actor")
 
 
 
@@ -983,10 +1064,14 @@ def spawn_resource_actor(static_mesh_asset, doc):
     # Populate the ResourceActor properties with JSON data
     parse_resource(resource, resource_actor)
 
+    # Create and assign dynamic material instance
+    material_path = "/Game/idaifield_resources/MA_ResourceActor"  # Adjust to your material path
+    create_dynamic_material_instance(resource_actor, material_path)
 
     # Log the creation of the ResourceActor
     ue.log(f"Created ResourceActor: {resource_actor.get_actor_label()} with static mesh: {static_mesh_asset.get_name()}")
-
+    # Position the text components based on the static mesh bounds
+    resource_actor.call_method("PositionTextComponents")
 
 
 def parse_resource(resource_json, resource_actor):
