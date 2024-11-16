@@ -108,7 +108,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('E:/GitHub/RCprocessing/config_sedimentcores.json')
+config = loadconfigs('C:/Users/gilgamesh/Documents/GitHub/RCprocessing/config_sedimentcores.json')
 
 
 def sort_image_series(folderpath, timedelta=60):
@@ -531,6 +531,7 @@ def generate_point_cloud_with_cameras(scan_df):
 def get_frontal_cameras(scan):
     # Step 1: Scale the rcbox by 30 along the local y-axis
     modified_rcbox = localspace_scale(scan['rcbox'], 1, 30, 1,save=False)
+    print('Thisbox',modified_rcbox)
 
     # Step 2: Create an oriented bounding box around the modified rcbox
     obb = modified_rcbox['geometry'].get_oriented_bounding_box()
@@ -540,6 +541,7 @@ def get_frontal_cameras(scan):
 
     # Step 4: Get the indices of cameras inside the bounding box
     indices = obb.get_point_indices_within_bounding_box(pcd_cameras.points)
+    print(indices)
 
     # Step 5: Filter out the points (cameras) in scan['imagedf'] that are not inside the bounding box
     scan['imagedf'] = scan['imagedf'].iloc[indices]
