@@ -4,8 +4,12 @@ Created on Wed Sep  2 11:37:59 2020
 
 @author: mhaibt
 """
+
 import json
+import shutil
 from mpl_toolkits.mplot3d import Axes3D
+import matplotlib
+matplotlib.use('TkAgg') 
 from matplotlib import cm
 from matplotlib import colors
 from matplotlib.colors import ListedColormap
@@ -24,8 +28,21 @@ from subprocess import check_output
 from sklearn.cluster import KMeans
 import sys
 sys.path.append("..")
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+#from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 import torch
+print(torch.__version__)
+print(torch.cuda.is_available())
+print(torch.version.cuda) 
+device = torch.device("cuda")
+torch.Tensor(1).to(device)
+from sam2.build_sam import build_sam2_video_predictor
+if device.type == "cuda":
+    # use bfloat16 for the entire notebook
+    torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
+    # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
+    if torch.cuda.get_device_properties(0).major >= 8:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
 #import skimage.data as data
 #import skimage.segmentation as seg
@@ -42,15 +59,9 @@ def loadconfigs(configpath):
 config = loadconfigs('.\config_scanner.json')
 
 def loadSAMpredictor():
-    sam_checkpoint = "C:/Users/mhaibt/Downloads/sam_vit_h_4b8939.pth"
-    model_type = "vit_h"
-
-    device = "cuda"
-
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-
-    predictor = SamPredictor(sam)
+    checkpoint = "E:/GitHub/segment-anything-2/checkpoints/sam2_hiera_large.pt"
+    model_cfg = "sam2_hiera_l.yaml"
+    predictor = build_sam2_video_predictor(model_cfg, checkpoint, device=device)
     return predictor
 
 
@@ -709,8 +720,6 @@ def extract_histogram(series, image, maskfield='segmentation'): # applied to a d
 
 import numpy as np
 
-import numpy as np
-
 def plothistograms(series, outpath):
     # Plot the histograms
     fig, axs = plt.subplots(1, 3, figsize=(34, 5))
@@ -967,7 +976,7 @@ def show_mask_asoutline(maskdf, original, outpath, labelfield, dpi=96, reference
 
 if config['maskobject_QS3D']:
     predictor = loadSAMpredictor()
-    sam = loadSAM()
+    #sam = loadSAM()
 
 def maskoutobject_QS3D(series, scale_percent = 5):
     start_time = time.time()
@@ -1081,7 +1090,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         object_mask = scaleimage(rgbmask, 2000)
         kernel = np.ones((64,64),np.uint8)
         mask= cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, kernel)
-        series['maskimg_path'] = series['rawimg_path'].with_name(series['rawimg_path'].name + '.mask.png')
+        series['maskimg_path'] = series['dev-img_path'].with_name(series['dev-img_path'].name + '.mask.png')
         print(f"rest-processing time : {time.time() - start_time:.4f} seconds")
         cv2.imwrite(str(series['maskimg_path']),mask)
         print(f"writing time: {time.time() - start_time :.4f} seconds")
@@ -1089,7 +1098,7 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #show_anns(masks2, str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')))
         finalmaskdf = pd.DataFrame([{'segmentation': mask, 'class': 'object'}])
         if config['maskobject_QS3D_visualized']:
-            show_mask_asoutline(finalmaskdf, original, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.final.png')), labelfield='class')
+            show_mask_asoutline(finalmaskdf, original, outpath = str(series['dev-img_path'].with_name(series['dev-img_path'].name + '.final.png')), labelfield='class')
         #plt.figure( figsize=(10,10))
         #plt.imshow(original)
         #show_mask(mask, plt.gca())
@@ -1099,3 +1108,393 @@ def maskoutobject_QS3D(series, scale_percent = 5):
         #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
 
     return series
+
+def imageto_camspecificfolder(series, outpath):
+    ## This function shall check the cam of the image, check if the folder exists, create the folder in the same directory where the dev-img_path is, if not and move the image to the folder
+    cam = series['cam_id']
+    print('This is the cam: ', cam)
+    camspecpath = outpath
+    print('This is the devimgpath_type: ', type(camspecpath))
+    print('This is the devimgpath: ', camspecpath)
+    #devimgpath = Path(devimgpath)
+    camfolder = Path(camspecpath) / cam
+
+    camfolder.mkdir(parents=True, exist_ok=True)
+    newpath = camfolder / series['dev-img_path'].name
+
+    #check if the image is already in the camfolder
+    if not newpath.exists():
+        shutil.move(series['dev-img_path'], newpath)
+    series['dev-img_path'] = newpath
+    return series
+
+
+
+
+def promptwithpoints(inference_state, points):
+    #predictor.reset_state(inference_state)
+    ann_frame_idx = 0  # the frame index we interact with
+    ann_obj_id = 1  # unique id for each object we interact with
+    # make the labelsarray with the same length as the points array (6) and make the first 3 positive and the last 3 negative
+    labels = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=np.int64)
+
+
+    _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+        inference_state=inference_state,
+        frame_idx=ann_frame_idx,
+        obj_id=ann_obj_id,
+        points=points,
+        labels=labels,
+    )
+    print('predictor finished')
+    return points, labels, out_obj_ids, out_mask_logits
+
+
+def percamfolder_segmentimageseries(imagedf):
+    # iterate over the grouped imagedf, grouped by cam
+    for cam, group in imagedf.groupby('cam_id'):
+        group = group.sort_values(by='imgnumber').reset_index(drop=True)
+        # get the first image
+        firstimage = group.iloc[0]
+        video_dir = firstimage['dev-img_path'].parent
+        frame_idx = 0
+
+        # Create figure once and reuse it
+        fig, ax = plt.subplots(figsize=(9, 6))
+        
+        # Step 1: Show the initial image
+        ax.set_title(f"frame {frame_idx}")
+        img = Image.open(firstimage['dev-img_path'])
+        ax.imshow(img)
+        plt.show(block=False)
+        plt.pause(1)  # Brief pause to let the figure render
+
+        # Step 2: Let the user click
+        #points = np.array([], dtype=np.float32)
+        coords = plt.ginput(n=10, timeout=-1)
+        coordsarray = np.array(coords, dtype=np.float32)
+        print('This is the coords: ', coordsarray)
+        #add the first point to the points array more points will come
+        #points = np.append(points, coords)
+        
+        # video_dir from pathlib object to stringpath
+        print('This is the video_dir: ', video_dir)
+        inference_state = predictor.init_state(video_path=str(video_dir))
+        print('This is the inference_state finished')
+
+        # Step 3: Show the point after clicking
+        points, labels, out_obj_ids, out_mask_logits = promptwithpoints(inference_state, coordsarray)
+        ax.cla()  # Clear the axes, but keep the same figure
+        ax.set_title(f"frame {frame_idx}")
+        ax.imshow(img)
+        show_points(points, labels, ax)  # Show clicked points
+        plt.show(block=False)
+        plt.pause(1)
+
+        # Step 4: Show the segmentation mask on the same image
+        ax.cla()  # Clear the axes again for updating the mask
+        ax.set_title(f"frame {frame_idx}")
+        ax.imshow(img)  # Redisplay the base image
+        show_points(points, labels, ax)  # Show clicked points again
+        show_mask((out_mask_logits[0] > 0.0).cpu().numpy(), ax, obj_id=out_obj_ids[0])  # Show segmentation
+        plt.pause(1)
+
+        # run propagation throughout the video and collect the results in a dict
+        video_segments = {}  # video_segments contains the per-frame segmentation results
+        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+            print(f"frame (mask) {out_frame_idx}")
+            video_segments[out_frame_idx] = {
+                out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                for i, out_obj_id in enumerate(out_obj_ids)
+            }
+
+        groupsorted = group.sort_values(by='dev-img_path')
+        # render the segmentation results every few frames
+        vis_frame_stride = 1
+        
+        for out_frame_idx, frameseries in groupsorted.iterrows():
+            print('this frame (original) is shown: ', out_frame_idx)
+            #plt.figure(figsize=(9, 6))
+            #plt.title(f"frame {out_frame_idx}")
+            #print('this path is shown: ', frameseries['dev-img_path'])
+            ax.imshow(Image.open(frameseries['dev-img_path']))
+            if out_frame_idx in video_segments:
+            
+                for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+                    show_mask(out_mask, ax, obj_id=out_obj_id)
+                    plt.show(block=False)
+                    rgbmask = binary_mask_to_rgb(out_mask)
+                    # Reshape the mask to the desired shape
+                    mask = rgbmask.squeeze()  # Remove the singleton dimension
+                    rgbmask = mask[:, :, np.newaxis]
+                    #mask = np.flip(mask, axis=0)  # Flip the mask vertically
+                    #mask = mask[:, :, np.newaxis]  # Add a singleton dimension for the channel
+
+                    # Resize the mask to the original image size
+                    #rgbmask = mask.astype(np.uint8)
+
+                    # Convert the mask to a single-channel image
+                    #out_mask = mask.astype(np.uint8)
+
+                    # Show the mask
+                    ax.imshow(rgbmask, cmap='gray', alpha=0.6)
+                    plt.show(block=False)
+                    plt.pause(1)
+                    
+                    print('This is the shape of the binary mask: ', out_mask.shape)
+                    print('This is the shape of the mask: ', rgbmask.shape)
+                    mask_path = frameseries['dev-img_path'].with_name(frameseries['dev-img_path'].stem + '.mask.png')
+                    maskimg = cv2.cvtColor(rgbmask.astype(np.uint8), cv2.COLOR_RGB2BGR)
+                    success = cv2.imwrite(str(mask_path), maskimg)
+                    if not success:
+                        print(f"Failed to write image")
+                    else:
+                        print(f"Successfully wrote image")
+
+
+
+    return imagedf
+
+
+def show_mask(mask, ax, obj_id=None, random_color=False):
+    if random_color:
+        color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
+    else:
+        cmap = plt.get_cmap("tab10")
+        cmap_idx = 0 if obj_id is None else obj_id
+        color = np.array([*cmap(cmap_idx)[:3], 0.6])
+    h, w = mask.shape[-2:]
+    mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
+    ax.imshow(mask_image, alpha=0.6)  # Ensure the mask is semi-transparent
+
+
+def show_points(coords, labels, ax, marker_size=200):
+    pos_points = coords[labels == 1]  # Positive points
+    neg_points = coords[labels == 0]  # Negative points
+    
+    # Scatter positive points
+    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+    
+    # Scatter negative points
+    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+
+
+def maskoutobject_QS3D_sam2(series, scale_percent = 5):
+    start_time = time.time()
+        
+    if 'maskimg_path' not in series.keys() or str(series.get('maskimg_path')) == 'nan' or config['overwrite_maskimg']:
+        print('Generating mask for this image: ', series['dev-img_path'])
+        original = cv2.imread(str(series['dev-img_path']))
+        original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
+
+        if Path(Path(config['workspace']) / 'masktemplates/basemasks').is_dir():
+            cammask = getCammask(series, Path(config['workspace']) / 'masktemplates/basemasks')
+        else:
+            print('Cammask not found')
+
+        frameless = applyMask(cammask, original)
+        
+
+        
+        gloveobject = colourkeyMask(frameless)
+        gloveobjectclean = undesired_objects(gloveobject)
+        invgloveobjectclean  = cv2.bitwise_not(gloveobjectclean )
+        bk = np.full(original.shape, 0, dtype=np.uint8)  
+        fg_masked = cv2.bitwise_and(original, original, mask=gloveobjectclean)
+        bk_masked = cv2.bitwise_and(bk, bk, mask=invgloveobjectclean) 
+        final = cv2.bitwise_or(fg_masked, bk_masked)
+        print(f"conventional-processing time: {time.time() - start_time:.4f} seconds")
+        img = scaleimage(original, scale_percent)
+        mask_generator_2 = SamAutomaticMaskGenerator(
+            model=sam,
+            points_per_batch=32,
+            points_per_side=16,
+            pred_iou_thresh=0.70,
+            stability_score_thresh=0.70,
+            crop_n_layers=1,
+            crop_n_points_downscale_factor=1,
+            min_mask_region_area=20,  
+        )
+        masks2 = mask_generator_2.generate(img)
+        print(f"sam-processing time: {time.time() - start_time:.4f} seconds")
+        masks_df = pd.DataFrame(masks2)
+        #show_masks_df = masks_df.copy()
+        #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
+        masks_df['class'] = 'unknown'
+        if config['maskobject_QS3D_visualized']:
+            show_mask_asoutline(masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')), labelfield='class')
+        ###check if masks in masks_df overlap with gloveobjectclean take only overlapping
+        gloveobjectclean_down = scaleimage(gloveobjectclean, scale_percent)
+
+        masks_df = masks_df.apply(get_overlapping, overlapagainst = gloveobjectclean_down, axis=1)
+        masks_df = masks_df[masks_df['overlap'] == True]
+        #show_masks_df = masks_df.copy()
+        #show_masks_df['segmentation'] = show_masks_df['segmentation'].apply(binary_mask_to_rgb)
+        if config['maskobject_QS3D_visualized']:
+            show_masks_df = masks_df.append(pd.DataFrame([{'segmentation':gloveobjectclean_down, 'class':'glove-object'}]))
+        
+            show_mask_asoutline(show_masks_df, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.samoverlap.png')), labelfield='class')
+        if not masks_df.empty:
+            #masks_df = masks_df[masks_df['area'] < 9000]
+            masks_df = masks_df.nlargest(14, 'predicted_iou').reset_index(drop=True)
+            #masks_df_area_iou = masks_df.nlargest(9, 'area').reset_index(drop=True)
+            masks_df_area_iou  = masks_df.apply(extract_histogram, image = img, axis=1)
+            masks_df_area_iou = cluster_segments(masks_df_area_iou)
+            masks_df_area_iou = merge_masks(masks_df_area_iou)
+            show_mask_asoutline(masks_df_area_iou, img, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.2clusters.png')), labelfield='class')
+            masks_df_area_iou  = masks_df_area_iou.apply(extract_histogram, image = img, axis=1)
+            masks_df_area_iou.apply(plothistograms, outpath = str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.2clusters_hist.png')) , axis=1)
+            masks_df_area_iou = defineGloveObject(masks_df_area_iou)
+            masks_df_area_iou = merge_masks(masks_df_area_iou)
+
+
+
+            if masks_df_area_iou['class'].str.contains('unknown').any(): 
+                print('Second round of segmentation')
+
+                whitestpixelcoords = findWhitestPixel_contours(final)
+                #print('This should be the base for bbox', masks_df_area_iou.loc[0]['segmentation'])
+                #rgbmask = ODlib.binary_mask_to_rgb(masks_df_area_iou.loc[0]['segmentation'], channels=3)
+                
+                #x,y,w,h = ODlib.getBoundingBox(rgbmask)         
+                #input_box = np.array([x,y,x+w,y+h])
+                input_box = masks_df_area_iou.loc[0]['bbox']
+                #print('This should be the bbox: ', input_box)
+                input_label = np.array([int(0) for i in range(len(whitestpixelcoords))])
+                center = get_center_coordinates(input_box)
+                input_points = whitestpixelcoords
+
+                if input_points.size == 0:
+                    print('No points found')
+                    input_points = np.array([center])
+                    input_label = np.array([int(1)])  
+                            
+                print(len(input_points), 'input points', len(input_label), 'input labels')
+                
+                predictor.set_image(img)
+                masks, scores, logits = predictor.predict(
+                    point_coords=input_points ,
+                    point_labels=input_label,
+                    box=input_box[None, :],
+                    multimask_output=False,
+                )
+                h, w = masks.shape[-2:]
+                mask_image = masks.reshape(h, w)
+                #print('mask image shape', mask_image.shape)
+                masks_df_area_iou['segmentation'] = [mask_image]
+                masks_df_area_iou['class'] = 'object'
+    
+ 
+        
+        
+        rgbmask = binary_mask_to_rgb(masks_df_area_iou[masks_df_area_iou['class']=='object'].iloc[0]['segmentation'])
+        object_mask = scaleimage(rgbmask, 2000)
+        kernel = np.ones((64,64),np.uint8)
+        mask= cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, kernel)
+        series['maskimg_path'] = series['dev-img_path'].with_name(series['dev-img_path'].name + '.mask.png')
+        print(f"rest-processing time : {time.time() - start_time:.4f} seconds")
+        cv2.imwrite(str(series['maskimg_path']),mask)
+        print(f"writing time: {time.time() - start_time :.4f} seconds")
+        #original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
+        #show_anns(masks2, str(series['rawimg_path'].with_name(series['rawimg_path'].name + '.sam.png')))
+        finalmaskdf = pd.DataFrame([{'segmentation': mask, 'class': 'object'}])
+        if config['maskobject_QS3D_visualized']:
+            show_mask_asoutline(finalmaskdf, original, outpath = str(series['dev-img_path'].with_name(series['dev-img_path'].name + '.final.png')), labelfield='class')
+        #plt.figure( figsize=(10,10))
+        #plt.imshow(original)
+        #show_mask(mask, plt.gca())
+        #show_box(input_box, plt.gca())
+        #show_points(input_points, input_label, plt.gca())
+        #plt.show()
+        #plt.savefig(series['rawimg_path'].with_name(series['rawimg_path'].name + '.segments.png'), format='jpg')
+
+    return series
+
+def colorcorrection(imageseries, colorreference, outputfolderpath, inputrawimagepathfield='rawimg_path', outputdevimagepathfield='dev-img_path'):
+    outfilebase = Path(str(imageseries[inputrawimagepathfield].stem) + config['devimage_format'])
+    outfile = outputfolderpath / outfilebase
+    outfileincamfolder = outputfolderpath / imageseries['cam_id'] / outfilebase
+    print('This is the outfileeincamfolder: ', outfileincamfolder)
+    # print datatype of outfile, is it a Path-Object?
+
+
+
+    for camref in colorreference['whitebalance']:
+        if camref['cam_id'] == imageseries['cam_id']:
+            whitepoint = camref['pos_color_019']
+            blackpoint = camref['pos_color_024']
+    #check if the outfile exists
+    print('This is the outfile: ', outfile)
+    print('and this is the typw: ', type(outfile))
+    if outfile.exists():
+        print('Color correction already exists')
+    if not outfile.exists() and not outfileincamfolder.exists():
+        print('Color correction does not exist')
+
+        if imageseries[inputrawimagepathfield].is_file():
+            img = cv2.imread(str(imageseries[inputrawimagepathfield]))
+            # Convert to LAB color space
+            lab_img = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+
+            # Extracting the average LAB color from a patch around the white point
+            x, y = whitepoint
+            lab_patch = lab_img[y-10:y+10, x-10:x+10]
+            lab_avg_white = np.mean(lab_patch, axis=(0, 1))
+            # Extracting the LAB color from the black point
+            x, y = blackpoint
+            lab_patch = lab_img[y-10:y+10, x-10:x+10]
+            lab_avg_black = np.mean(lab_patch, axis=(0, 1))
+
+
+            # Target LAB values for a neutral white patch
+            white_color = np.uint8([[[254, 254, 254]]])
+            white_color = cv2.cvtColor(white_color, cv2.COLOR_RGB2LAB)
+            print('LAB average: ', lab_avg_white)
+            print('LAB white: ', white_color)
+
+            # Target LAB values for a neutral black patch
+            black_color = np.uint8([[[30, 30, 30]]])
+            black_color = cv2.cvtColor(black_color, cv2.COLOR_RGB2LAB)
+            print('LAB average black: ', lab_avg_black)
+
+            # Calculate correction factors
+            # get the first channel of the white color and divide it by the average of the white color
+
+            L_scale = (white_color[0][0][0] / lab_avg_white[0])
+            A_shift = white_color[0][0][1] / lab_avg_white[1]
+            B_shift = white_color[0][0][2] / lab_avg_white[2]
+            print('Correction factors: ', L_scale, A_shift, B_shift)
+
+            # Calculate correction factors black point
+            L_scale_black = (black_color[0][0][0] / lab_avg_black[0])
+            A_shift_black = black_color[0][0][1] / lab_avg_black[1]
+            B_shift_black = black_color[0][0][2] / lab_avg_black[2]
+
+            # Print and compare the correction factors
+            print('Correction factors black: ', L_scale_black, A_shift_black, B_shift_black)
+            print('Correction factors: ', L_scale, A_shift, B_shift)
+
+            #average # white and black correction factors
+            #L_scale = (L_scale + L_scale_black) / 2
+            #A_shift = (A_shift + A_shift_black) / 2
+            #B_shift = (B_shift + B_shift_black) / 2
+
+            #blend the correction factors
+            blendfactor = 0.7
+
+            # Apply correction factors in LAB space
+            lab_img[:, :, 0] = np.clip(lab_img[:, :, 0] * L_scale * blendfactor, 0, 255)
+            lab_img[:, :, 1] = np.clip(lab_img[:, :, 1] * A_shift, 0, 255)
+            lab_img[:, :, 2] = np.clip(lab_img[:, :, 2] * B_shift, 0, 255)
+
+            # Convert back to RGB
+            corrected_img = cv2.cvtColor(lab_img.astype(np.uint8), cv2.COLOR_LAB2BGR)
+            
+            # Write the corrected image
+            cv2.imwrite(str(outfile), corrected_img)
+    if outfile.exists() or outfileincamfolder.exists():
+        print(f"Color corrected image saved to {outfile}")
+        imageseries[outputdevimagepathfield] = outfile
+
+    return imageseries
+

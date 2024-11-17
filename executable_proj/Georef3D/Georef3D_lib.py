@@ -6,6 +6,7 @@
 import json
 from pathlib import Path
 import numpy as np
+import geopandas as gpd
 import open3d as o3d
 import open3d.visualization.rendering as rendering
 import pandas as pd
@@ -869,13 +870,20 @@ class GeoReferencer(QMainWindow):
             return
 
         self.image = cv2.imread(str(self.image_path), cv2.IMREAD_UNCHANGED)
+        if self.image is None:
+            print(f"Failed to load image from {self.image_path}")
+            return
+
         self.original_image = self.image.copy()
 
         # Update label
         self.image_path_label.setText(f"Loaded Image: {self.image_path}")
 
         # Display image
-        qim = QImage(self.image.tobytes("raw", "RGBA"), self.image.width, self.image.height, QImage.Format_RGBA8888)
+        if len(self.image.shape) == 3 and self.image.shape[2] == 3:  # Check if image is BGR
+            qim = QImage(self.image.data, self.image.shape[1], self.image.shape[0], self.image.strides[0], QImage.Format_BGR888)
+        elif len(self.image.shape) == 3 and self.image.shape[2] == 4:  # Check if image is BGRA
+            qim = QImage(self.image.data, self.image.shape[1], self.image.shape[0], self.image.strides[0], QImage.Format_ARGB32)
         pixmap = QPixmap.fromImage(qim)
         self.scene.clear()
         self.scene.addPixmap(pixmap)

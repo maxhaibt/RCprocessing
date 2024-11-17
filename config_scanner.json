@@ -2,7 +2,7 @@
     "RTpath": "C:/Program Files/RawTherapee/5.8/rawtherapee-cli.exe",
     "RCpath": "C:/Program Files/Capturing Reality/RealityCapture/RealityCapture.exe",
     "messagepath": "E:/WES_paleoenvi/utils",
-    "workspace": "E:/testSAM/nice_tablets",
+    "workspace": "E:/testSAM/test_alignqual/subtest",
     "excludescanids": ["masktemplates"],
     "alignmentreport_template": "C:/Users/gilgamesh/Documents/GitHub/RCprocessingAlignmentView.html",
     "use_initialdf": false,
@@ -45,6 +45,9 @@
     "devimage_format": ".JPG",
     "exportsettings1": "E:/GitHub/RCprocessing/export_param.xml",
     "exportname_prefix": "",
-    "rcorthobox2gis": false
+    "rcorthobox2gis": false,
+    "use_startpointtransformation": false,
+    "developimages_QS3D": true,
+    "colorreference_path": "E:/testSAM/RCutils/colorcalib_whiteblackframe_config.json"
 }
     
