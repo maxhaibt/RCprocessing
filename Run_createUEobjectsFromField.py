@@ -6,7 +6,7 @@ from pathlib import Path
 my_module = importlib.import_module('UE5lib')
 importlib.reload(my_module)
 
-search_string = "URUK26"
+search_string = "URUK15"
 ue.log(search_string)
 
 config = UE5lib.loadconfigs('E:/UEpythonutils/URUKVR_config.json')
@@ -26,9 +26,14 @@ api = UE5lib.couchDB_APIs(config)
 matching_docs = UE5lib.getDocsIfContainStringInIdentifier(api, search_string)
 sedimentcore_docs = UE5lib.filter_docs_by_category(matching_docs, "Sedimentcore")
 related_docs = UE5lib.get_related_docs_by_liesWithin(api, sedimentcore_docs)
+for doc in related_docs:
+    ue.log(doc['resource']['identifier'])
 # get related docs from related_docs and append them
 subrelated_docs = UE5lib.get_related_docs_by_liesWithin(api, related_docs)
 related_docs += subrelated_docs
+for doc in related_docs:
+    ue.log(doc['resource']['identifier'])
+
 ue.log(related_docs)
 for doc in related_docs:
     resource_identifier = doc['resource'].get('identifier') # Get the resource identifier

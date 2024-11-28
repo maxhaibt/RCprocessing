@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import os
 import re
-import pandas as pd
+#import pandas as pd
 import math
 #import open3d as o3d
 
@@ -931,7 +931,7 @@ def create_dynamic_cylinder_and_save(top_center_position, top_value, bottom_valu
     ue.log(f"Copy mesh outcome: {outcome}")
     return static_mesh_asset
 
-
+ 
 
 
 
@@ -1100,11 +1100,296 @@ def parse_resource(resource_json, resource_actor):
     if 'sampleType' in resource_json:
         resource_actor.set_editor_property("SampleType", resource_json['sampleType'])
     
-    if 'shortDescription' in resource_json:
-        resource_actor.set_editor_property("ShortDescription", resource_json['shortDescription'])
+        
+    if 'shortDescription' in resource_json and resource_json['shortDescription']:
+        short_description = resource_json['shortDescription']
+    else:
+        short_description = ""  # Default to an empty string if not present
+
+    if 'description' in resource_json and resource_json['description']:
+        normal_description = resource_json['description']
+        resource_actor.set_editor_property("Description", normal_description)  # Keep the original description
+    else:
+        normal_description = ""  # Default to an empty string if not present
+
+    # Combine shortDescription and description for ShortDescription
+    combined_description = f"{short_description} {normal_description}".strip()
+    resource_actor.set_editor_property("ShortDescription", combined_description)
+        
+
+def shift_sediment_cores_to_player(search_string, player_actor_label="CameraActor_compareProfile"):
+    """
+    Temporarily shift sediment cores in X and Y axes to place them next to the player.
+
+    Args:
+        search_string (str): String to search for sediment core static meshes.
+        player_actor_label (str): Label of the player actor. Default is "Player".
+    """
+    try:
+        # Step 1: Search for the sediment core actors
+        sediment_core_actors = get_static_mesh_actors_by_name(search_string)
+        if not sediment_core_actors:
+            ue.log_error(f"No actors found with search string: {search_string}")
+            return
+
+        # Step 2: Find the top-center position of the core series
+        top_center_position = get_top_center_of_0to1m_mesh(sediment_core_actors)
+        if not top_center_position:
+            ue.log_error("Failed to find top-center position for the cores.")
+            return
+
+        # Step 3: Find the player's location
+        all_actors = ue.EditorLevelLibrary.get_all_level_actors()
+        player_actor = next((actor for actor in all_actors if actor.get_actor_label() == player_actor_label), None)
+        if not player_actor:
+            ue.log_error(f"Player actor with label '{player_actor_label}' not found.")
+            return
+
+        player_location = player_actor.get_actor_location()
+
+        # Step 4: Calculate the transformation vector for X and Y
+        shift_vector = ue.Vector(
+            player_location.x - top_center_position.x,
+            player_location.y - top_center_position.y,
+            0  # Only shifting in X and Y, so Z remains unchanged
+        )
+        ue.log(f"Calculated shift vector: {shift_vector}")
+
+        # Step 5: Apply the shift to each sediment core
+        for actor in sediment_core_actors:
+            current_location = actor.get_actor_location()
+            new_location = ue.Vector(
+                current_location.x + shift_vector.x,
+                current_location.y + shift_vector.y,
+                current_location.z  # Keep Z position the same
+            )
+            actor.set_actor_location(new_location, sweep=False, teleport=True)
+            ue.log(f"Shifted actor {actor.get_actor_label()} to {new_location}")
+
+        ue.log("All sediment cores successfully shifted to the player's location.")
+
+    except Exception as e:
+        ue.log_error(f"An error occurred while shifting sediment cores: {str(e)}")
+
+def assign_dynamic_material_to_dynamic_mesh(dynamic_mesh_actor, material_path):
+    """
+    Create and assign a dynamic material instance to the dynamic mesh component of the given actor.
+
+    Args:
+        dynamic_mesh_actor: The actor to which the material will be assigned.
+        material_path: The path of the base material to create the dynamic instance from.
+    """
+    # Load the base material
+    base_material = ue.EditorAssetLibrary.load_asset(material_path)
     
-    if 'description' in resource_json:
-        resource_actor.set_editor_property("Description", resource_json['description'])
+    if base_material is None:
+        ue.log_error(f"Failed to load the material from {material_path}")
+        return
+
+    # Get the dynamic mesh component of the actor
+    mesh_component = dynamic_mesh_actor.get_dynamic_mesh_component()
+
+    if mesh_component is not None:
+        # Create a dynamic material instance
+        dynamic_material_instance = ue.MaterialLibrary.create_dynamic_material_instance(
+            dynamic_mesh_actor,  # world_context_object
+            base_material  # parent material
+        )
+
+        if dynamic_material_instance is None:
+            ue.log_error("Failed to create dynamic material instance")
+            return
+        
+        # Assign the dynamic material instance to the first material slot
+        mesh_component.set_material(0, dynamic_material_instance)
+        ue.log(f"Dynamic material instance assigned to {dynamic_mesh_actor.get_actor_label()}")
+    else:
+        ue.log_error("DynamicMeshComponent not found in the actor")
+
+
+def create_reference_frame(player_actor_label, start_value, end_value, radius=0.2, step_interval=5.0, z_shift=1220.76):
+    """
+    Create a dynamic reference frame in the level using GeneratedDynamicMeshActor.
+    The frame consists of a vertical cylinder (main frame) and horizontal cylinders (steps),
+    with labels indicating absolute heights.
+
+    Args:
+        player_actor_label (str): The label of the player actor to which the frame will be shifted.
+        start_value (float): The starting value (bottom of the cylinder).
+        end_value (float): The ending value (top of the cylinder).
+        radius (float): The radius of the vertical cylinder. Default is 0.2 cm.
+        step_interval (float): The interval between horizontal steps in cm. Default is 5 cm.
+        z_shift (float): The shift to calculate absolute heights. Default is 1220.76.
     
+    Returns:
+        None
+    """
+    # Step 1: Validate the range
+    if end_value <= start_value:
+        ue.log_error("End value must be greater than start value.")
+        return
+
+    # Step 2: Find the player's actor by label
+    all_actors = ue.EditorLevelLibrary.get_all_level_actors()
+    player_actor = next((actor for actor in all_actors if actor.get_actor_label() == player_actor_label), None)
+
+    if not player_actor:
+        ue.log_error(f"Player actor with label '{player_actor_label}' not found.")
+        return
+
+    # Step 3: Get the player's location
+    player_location = player_actor.get_actor_location()
+
+    # Step 4: Adjust height range with reverse shift
+    adjusted_start = start_value + z_shift
+    adjusted_end = end_value + z_shift
+    adjusted_height = adjusted_end - adjusted_start
+
+    # Step 5: Spawn the GeneratedDynamicMeshActor
+    frame_actor = ue.EditorLevelLibrary.spawn_actor_from_class(ue.GeneratedDynamicMeshActor, player_location)
+    frame_actor.set_actor_label("ReferenceFrameActor")
+
+    # Step 6: Get the dynamic mesh component
+    dynamic_mesh_component = frame_actor.dynamic_mesh_component
+    if not dynamic_mesh_component:
+        ue.log_error("Failed to access dynamic_mesh_component on GeneratedDynamicMeshActor.")
+        return
+
+    # Step 7: Generate the vertical cylinder (main frame)
+    vertical_cylinder_transform = ue.Transform()
+    vertical_cylinder_transform.translation = ue.Vector(0, 0, adjusted_start + (adjusted_height / 2.0))
+
+    frame_mesh = ue.DynamicMesh()
+    ue.GeometryScript_Primitives.append_cylinder(
+        target_mesh=frame_mesh,
+        primitive_options=ue.GeometryScriptPrimitiveOptions(),
+        transform=vertical_cylinder_transform,
+        radius=radius,
+        height=adjusted_height,
+        radial_steps=6,
+        height_steps=1,
+        capped=True,
+        origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
+    )
+
+    # Apply the mesh to the dynamic mesh component
+    dynamic_mesh_component.set_dynamic_mesh(frame_mesh)
+
+    # Step 8: Assign a material to the mesh
+    material_path = "/Game/CoordinateDisplay/MA_framecoordinatedisplay"
+    base_material = ue.EditorAssetLibrary.load_asset(material_path)
+    if base_material is None:
+        ue.log_error(f"Failed to load the material from {material_path}")
+    else:
+        dynamic_mesh_component.set_material(0, base_material)
+
+    # Step 9: Add horizontal cylinders (steps) and labels
+    num_steps = int(adjusted_height / step_interval)
+    for i in range(num_steps + 1):
+        step_height = adjusted_start + i * step_interval
+        absolute_height = step_height - z_shift
+
+        # Horizontal cylinder (tick)
+        horizontal_cylinder_transform = ue.Transform()
+        horizontal_cylinder_transform.translation = ue.Vector(0, 0, step_height)
+        horizontal_cylinder_transform.rotation = ue.Rotator(0, 90, 0).quaternion()
+
+        ue.GeometryScript_Primitives.append_cylinder(
+            target_mesh=frame_mesh,
+            primitive_options=ue.GeometryScriptPrimitiveOptions(),
+            transform=horizontal_cylinder_transform,
+            radius=radius / 2.0,
+            height=10,
+            radial_steps=6,
+            height_steps=1,
+            capped=True,
+            origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
+        )
+
+        # Text label for absolute height
+        label_component = ue.TextRenderComponent(outer=frame_actor)
+        label_component.set_editor_property("text", f"{absolute_height:.2f} cm")
+        label_component.set_editor_property("text_render_color", ue.Color(255, 255, 255, 255))  # White text
+        label_component.set_editor_property("world_size", 10.0)
+        label_component.set_editor_property("relative_location", ue.Vector(0, radius * 5.0, step_height))
+        label_component.set_editor_property("horizontal_alignment", ue.HorizTextAligment.EHTA_CENTER)
+
+        # Attach the text component to the root component with explicit rules
+        label_component.attach_to_component(
+            frame_actor.root_component,
+            socket_name="",
+            location_rule=ue.AttachmentRule.SNAP_TO_TARGET,
+            rotation_rule=ue.AttachmentRule.SNAP_TO_TARGET,
+            scale_rule=ue.AttachmentRule.KEEP_WORLD
+        )
+
+    # Notify the actor to rebuild its mesh
+    frame_actor.mark_for_mesh_rebuild()
+
+    ue.log("Reference frame created with GeneratedDynamicMeshActor.")
+
+
+def create_thick_component(blueprint_path, cylinder_diameter=0.3, cylinder_length=2.0, label_distance=2.0):
+    """
+    Create a "Thick" component Blueprint with a StaticMesh cylinder and a TextRenderComponent.
+
+    Args:
+        blueprint_path (str): Path to save the Blueprint in the Content Browser (e.g., "/Game/Blueprints/ThickBP").
+        cylinder_diameter (float): Diameter of the cylinder in cm. Default is 0.3cm.
+        cylinder_length (float): Length of the cylinder in cm. Default is 2cm.
+        label_distance (float): Distance of the TextRenderComponent from the cylinder's origin in cm. Default is 2cm.
+    """
+    # Step 1: Create a new Actor Blueprint
+    asset_tools = ue.AssetToolsHelpers.get_asset_tools()
+    blueprint_factory = ue.BlueprintFactory()
+    blueprint_factory.set_editor_property("parent_class", ue.Actor)
+    blueprint = asset_tools.create_asset(
+        blueprint_path.split("/")[-1],  # Asset Name
+        "/".join(blueprint_path.split("/")[:-1]),  # Asset Path
+        ue.Blueprint,  # Blueprint Class
+        blueprint_factory
+    )
+
+    if not blueprint:
+        ue.log_error(f"Failed to create Blueprint at {blueprint_path}")
+        return None
+
+    # Step 2: Add a StaticMeshComponent for the cylinder
+    cylinder_component = ue.EditorSubsystemLibrary.add_component(
+        blueprint, component_type=ue.StaticMeshComponent, name="CylinderMesh"
+    )
+    if not cylinder_component:
+        ue.log_error("Failed to add StaticMeshComponent to Blueprint.")
+        return None
+
+    # Configure the StaticMeshComponent
+    cylinder_mesh = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cylinder")
+    cylinder_component.set_editor_property("static_mesh", cylinder_mesh)
+    cylinder_component.set_editor_property("mobility", ue.ComponentMobility.STATIC)
+    cylinder_component.set_editor_property("relative_scale3d", ue.Vector(cylinder_diameter, cylinder_diameter, cylinder_length))
+    cylinder_component.set_editor_property("relative_location", ue.Vector(0, 0, cylinder_length / 2))  # Adjust origin
+
+    # Step 3: Add a TextRenderComponent for the label
+    text_render_component = ue.EditorSubsystemLibrary.add_component(
+        blueprint, component_type=ue.TextRenderComponent, name="LabelText"
+    )
+    if not text_render_component:
+        ue.log_error("Failed to add TextRenderComponent to Blueprint.")
+        return None
+
+    # Configure the TextRenderComponent
+    text_render_component.set_editor_property("text", "Label")
+    text_render_component.set_editor_property("text_render_color", ue.LinearColor(1.0, 1.0, 1.0, 1.0))  # White text
+    text_render_component.set_editor_property("world_size", 2.0)  # Adjust size
+    text_render_component.set_editor_property("relative_location", ue.Vector(0, label_distance, 0))
+    text_render_component.attach_to_component(cylinder_component)
+
+    # Step 4: Save the Blueprint
+    ue.EditorAssetLibrary.save_asset(blueprint_path)
+    ue.log(f"Blueprint saved at: {blueprint_path}")
+
+    return blueprint
+
+
 
 
