@@ -7,8 +7,9 @@ from pathlib import Path
 import numpy as np
 import os
 import re
-#import pandas as pd
+import pandas as pd
 import math
+from collections import defaultdict
 #import open3d as o3d
 
 #import RClib as RClib
@@ -457,6 +458,72 @@ def provide_meshdf(folder_path):
     return df
 
 
+
+def parse_mesh_directory(mesh_folder):
+    """
+    Parses a directory containing multiple parts of a 3D mesh and organizes the files into a structured list of dictionaries.
+    Ensures .mtl files are correctly assigned to the corresponding .obj files and supports multiple parts.
+
+    Parameters:
+    - mesh_folder (str): Path to the directory containing the mesh files.
+
+    Returns:
+    - list: A list of dictionaries, each representing a part with its OBJ tiles, corresponding MTL files, and textures.
+    """
+    
+    # Supported texture file extensions
+    texture_extensions = {".jpg", ".jpeg", ".png", ".tga", ".bmp"}
+
+    # Regex pattern to extract part identifier from filenames (e.g., parts_0000002_0000001.obj)
+    part_pattern = re.compile(r'parts_(\d+)_')  # Matches the integer after 'parts_'
+
+    # Data structure to store parsed information
+    mesh_parts = defaultdict(lambda: {"partname": None, "OBJtilesAndMtls": [], "textures": []})
+
+    # Temporary dictionary to store OBJ-MTL pairs
+    obj_mtl_mapping = defaultdict(lambda: {"OBJtile": None, "Mtl": None})
+
+    # List all files in the directory
+    file_list = [os.path.normpath(os.path.join(mesh_folder, f)) for f in os.listdir(mesh_folder) if os.path.isfile(os.path.join(mesh_folder, f))]
+
+
+    # First pass: Collect all OBJ and MTL files
+    for file_path in file_list:
+        filename = os.path.basename(file_path)
+        base_name, ext = os.path.splitext(filename)  # Extract base name and extension
+
+        # Extract part number
+        match = part_pattern.search(filename)
+        if not match:
+            continue  # Skip files that don't match the expected pattern
+
+        part_id = int(match.group(1))
+        part_name = f"part_{part_id}"
+
+        # Assign part name if not already set
+        if mesh_parts[part_id]["partname"] is None:
+            mesh_parts[part_id]["partname"] = part_name
+
+        # Store OBJ and MTL files together
+        if ext == ".obj":
+            obj_mtl_mapping[base_name]["OBJtile"] = file_path
+        elif ext == ".mtl":
+            obj_mtl_mapping[base_name]["Mtl"] = file_path
+
+        # Identify texture files
+        elif ext in texture_extensions:
+            mesh_parts[part_id]["textures"].append(file_path)
+
+    # Second pass: Add paired OBJ-MTL data to the final structure
+    for base_name, obj_mtl in obj_mtl_mapping.items():
+        if obj_mtl["OBJtile"]:  # Ensure only valid pairs are added
+            part_id = int(part_pattern.search(base_name).group(1))  # Extract part ID from base name
+            mesh_parts[part_id]["OBJtilesAndMtls"].append(obj_mtl)
+
+    return list(mesh_parts.values())
+
+
+
 def parse_mtl(file_path):
     """
     Parse a .mtl file and represent it as a pandas DataFrame.
@@ -489,7 +556,7 @@ def parse_mtl(file_path):
                 current_material_data['Material Name'] = line.split()[1]
             
             # Check if the line defines a texture
-            elif line.startswith('map_Kd'):
+            elif line.startswith('Kd') or line.startswith('map_Kd'):
                 current_material_data['Texture Path'] = line.split()[1]
 
     # Add the last material data if it exists
@@ -567,11 +634,28 @@ def build_import_options(texturestemname: str, basematerial):
     options.texture_import_data.set_editor_properties({'base_diffuse_texture_name' : texturestemname})                                        
     return options
 
+def build_meshtile_import_options():
+    options = ue.FbxImportUI()
+    #print(options.get_editor_property('static_mesh_import_data'))
+    # ue.FbxImportUI
+    options.set_editor_property("import_mesh", True)
+    options.set_editor_property("is_obj_import", True)
+    options.set_editor_property("import_textures", False)
+    options.set_editor_property("import_materials", False)
+    #options.import_as_skeletal = True
+    #ue.FbxMeshImportData
+    #ue.log(options.get_editor_property("is_obj_import"))
+    options.static_mesh_import_data.set_editor_properties({'import_uniform_scale': 100.0})
+    options.static_mesh_import_data.set_editor_properties({'build_nanite': True}) 
+    # Texture options
+                                     
+    return options
+
 def build_fbxfactory(task):
     fbxfactory = ue.FbxFactory()
     fbxfactory.set_editor_property("asset_import_task", task)
     fbxfactory.set_editor_property('editor_import', True)
-    #fbxfactory.set_editor_property('formats',[]
+    fbxfactory.set_editor_property('formats',[])
     return fbxfactory
 
 def build_texture_factory():
@@ -596,24 +680,64 @@ def build_import_tasks(filename: str, texture_files: list, destination_path: str
     
 
     # Identify UDIM-texture files and create tasks for the first one in list which takes the rest of the UDIM files in the folder as dependencies
-    texture_factory = build_texture_factory()
+    #texture_factory = build_texture_factory()
     
     for file in [texture_files[0]]:
         
-        texture_task = ue.AssetImportTask()
-        texture_task.set_editor_property("automated", True)
-        texture_task.set_editor_property("destination_path", destination_path)
-        texture_task.set_editor_property("filename", file)
-        texture_task.set_editor_property("replace_existing", True)
-        texture_task.set_editor_property("replace_existing_settings", True)
-        texture_task.set_editor_property("factory", texture_factory)
-        tasks.append(texture_task)
+       texture_task = ue.AssetImportTask()
+       texture_task.set_editor_property("automated", True)
+       texture_task.set_editor_property("destination_path", destination_path)
+       texture_task.set_editor_property("filename", file)
+       texture_task.set_editor_property("replace_existing", True)
+       texture_task.set_editor_property("replace_existing_settings", True)
+       texture_task.set_editor_property("factory", build_texture_factory())
+       tasks.append(texture_task)
     tasks.append(obj_task)
     return tasks
 
-def import_static_mesh(tasks):
+
+def build_import_texture_tasks(texture_files: list, destination_path: str):
+    tasks = []
+  
+
+    # Identify UDIM-texture files and create tasks for the first one in list which takes the rest of the UDIM files in the folder as dependencies
+    #texture_factory = build_texture_factory()
+    
+    for file in [texture_files[0]]:
+        
+       texture_task = ue.AssetImportTask()
+       texture_task.set_editor_property("automated", True)
+       texture_task.set_editor_property("destination_path", destination_path)
+       texture_task.set_editor_property("filename", file)
+       texture_task.set_editor_property("replace_existing", False)
+       texture_task.set_editor_property("replace_existing_settings", True)
+       texture_task.set_editor_property("factory", build_texture_factory())
+       texture_task.set_editor_property("save", True)
+       tasks.append(texture_task)
+    tasks.append(texture_task)
+    return tasks
+
+def build_meshtile_import_tasks(filename: str, destination_path: str, options):
+    tasks = []
+    
+    # Setup the OBJ import task as you did
+    obj_task = ue.AssetImportTask()
+    obj_task.set_editor_property("automated", True)
+    obj_task.set_editor_property("destination_path", destination_path)
+    obj_task.set_editor_property("filename", filename)
+    obj_task.set_editor_property("replace_existing", True)
+    obj_task.set_editor_property("replace_existing_settings", True)
+    obj_task.set_editor_property("options", options)
+    fbxfactory = build_fbxfactory(obj_task)
+    obj_task.set_editor_property("factory", fbxfactory)
+    obj_task.set_editor_property("save", True)
+    tasks.append(obj_task)
+    return tasks
+
+def import_asset(tasks):
     asset_tools = ue.AssetToolsHelpers.get_asset_tools()
     asset_tools.import_asset_tasks(tasks)
+    ue.log("Imported static mesh and texture assets.")
 
 def get_texturestemname(texture_files: list):
     directory, obj_filename = os.path.split(texture_files[0])
@@ -686,6 +810,48 @@ def set_udim_texture_to_material_instance(mesh_import_path: str, material_instan
 
     else:
         ue.log_error("The loaded asset is not a MaterialInstanceConstant!")
+
+def create_constant_material_instance(base_material_path: str, UEdestination: str, material_instance_name: str, texturepath: str):
+
+    # Get the asset tools interface
+    asset_tools = ue.AssetToolsHelpers.get_asset_tools()
+
+    # Define the base material (Replace with your actual material path)
+    #material_path = "/Game/Materials/BaseMaterial"  # Change to your material
+    base_material = ue.EditorAssetLibrary.load_asset(base_material_path)
+
+    # Define where to save the material instance
+    #instance_name = "MyMaterialInstance"
+    instance_path = UEdestination + "/" + material_instance_name
+    # Ensure the material exists
+    if not base_material:
+        ue.log_error(f"Material not found: {base_material_path}")
+    else:
+        # Create a MaterialInstanceConstantFactoryNew instance
+        factory = ue.MaterialInstanceConstantFactoryNew()
+        # Create the Material Instance Constant asset
+        material_instance = asset_tools.create_asset(material_instance_name, UEdestination, ue.MaterialInstanceConstant, factory)
+
+        if material_instance:
+            # Set the parent material
+            material_instance.set_editor_property("parent", base_material)
+            texture = ue.EditorAssetLibrary.load_asset(texturepath)
+            new_param = ue.TextureParameterValue()
+            new_param.parameter_info.name = "emmisive"
+            new_param.parameter_value = texture
+            print('This is the new parameter:', new_param)
+            material_instance.set_editor_property('texture_parameter_values', [new_param])
+
+            # Save the new Material Instance to the Content Browser
+            ue.EditorAssetLibrary.save_asset(instance_path)
+
+            ue.log(f"Material Instance created successfully: {instance_path}")
+            return material_instance
+        else:
+            ue.log_error("Failed to create Material Instance")
+            return None
+
+
 
 
 
@@ -1207,188 +1373,34 @@ def assign_dynamic_material_to_dynamic_mesh(dynamic_mesh_actor, material_path):
         ue.log_error("DynamicMeshComponent not found in the actor")
 
 
-def create_reference_frame(player_actor_label, start_value, end_value, radius=0.2, step_interval=5.0, z_shift=1220.76):
-    """
-    Create a dynamic reference frame in the level using GeneratedDynamicMeshActor.
-    The frame consists of a vertical cylinder (main frame) and horizontal cylinders (steps),
-    with labels indicating absolute heights.
 
-    Args:
-        player_actor_label (str): The label of the player actor to which the frame will be shifted.
-        start_value (float): The starting value (bottom of the cylinder).
-        end_value (float): The ending value (top of the cylinder).
-        radius (float): The radius of the vertical cylinder. Default is 0.2 cm.
-        step_interval (float): The interval between horizontal steps in cm. Default is 5 cm.
-        z_shift (float): The shift to calculate absolute heights. Default is 1220.76.
+def assign_texture_to_constant_material(material_instance, texture_path: str):
+    """
+    Assigns a texture to the BaseColor parameter of the given material instance.
+
+    :param material_instance: The material instance reference
+    :param texture_path: Path to the texture asset
+    """
+
+    if not material_instance:
+        ue.log_error("Invalid material instance provided.")
+        return
     
-    Returns:
-        None
-    """
-    # Step 1: Validate the range
-    if end_value <= start_value:
-        ue.log_error("End value must be greater than start value.")
+    # Load texture
+    texture = ue.EditorAssetLibrary.load_asset(texture_path)
+    if not texture:
+        ue.log_error(f"Texture not found: {texture_path}")
         return
+    
+    # Set the texture parameter
+    material_instance.set_editor_property("texture_parameter_values", [{"ParameterInfo": {"Name": "BaseColor"}, "ParameterValue": texture}])
 
-    # Step 2: Find the player's actor by label
-    all_actors = ue.EditorLevelLibrary.get_all_level_actors()
-    player_actor = next((actor for actor in all_actors if actor.get_actor_label() == player_actor_label), None)
+    # Save the modified material instance
+    ue.EditorAssetLibrary.save_asset(material_instance.get_path_name())
 
-    if not player_actor:
-        ue.log_error(f"Player actor with label '{player_actor_label}' not found.")
-        return
+    ue.log(f"Texture assigned successfully to material instance: {material_instance.get_path_name()}")
+    ue.EditorLoadingAndSavingUtils.unload_unused_assets()
 
-    # Step 3: Get the player's location
-    player_location = player_actor.get_actor_location()
-
-    # Step 4: Adjust height range with reverse shift
-    adjusted_start = start_value + z_shift
-    adjusted_end = end_value + z_shift
-    adjusted_height = adjusted_end - adjusted_start
-
-    # Step 5: Spawn the GeneratedDynamicMeshActor
-    frame_actor = ue.EditorLevelLibrary.spawn_actor_from_class(ue.GeneratedDynamicMeshActor, player_location)
-    frame_actor.set_actor_label("ReferenceFrameActor")
-
-    # Step 6: Get the dynamic mesh component
-    dynamic_mesh_component = frame_actor.dynamic_mesh_component
-    if not dynamic_mesh_component:
-        ue.log_error("Failed to access dynamic_mesh_component on GeneratedDynamicMeshActor.")
-        return
-
-    # Step 7: Generate the vertical cylinder (main frame)
-    vertical_cylinder_transform = ue.Transform()
-    vertical_cylinder_transform.translation = ue.Vector(0, 0, adjusted_start + (adjusted_height / 2.0))
-
-    frame_mesh = ue.DynamicMesh()
-    ue.GeometryScript_Primitives.append_cylinder(
-        target_mesh=frame_mesh,
-        primitive_options=ue.GeometryScriptPrimitiveOptions(),
-        transform=vertical_cylinder_transform,
-        radius=radius,
-        height=adjusted_height,
-        radial_steps=6,
-        height_steps=1,
-        capped=True,
-        origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
-    )
-
-    # Apply the mesh to the dynamic mesh component
-    dynamic_mesh_component.set_dynamic_mesh(frame_mesh)
-
-    # Step 8: Assign a material to the mesh
-    material_path = "/Game/CoordinateDisplay/MA_framecoordinatedisplay"
-    base_material = ue.EditorAssetLibrary.load_asset(material_path)
-    if base_material is None:
-        ue.log_error(f"Failed to load the material from {material_path}")
-    else:
-        dynamic_mesh_component.set_material(0, base_material)
-
-    # Step 9: Add horizontal cylinders (steps) and labels
-    num_steps = int(adjusted_height / step_interval)
-    for i in range(num_steps + 1):
-        step_height = adjusted_start + i * step_interval
-        absolute_height = step_height - z_shift
-
-        # Horizontal cylinder (tick)
-        horizontal_cylinder_transform = ue.Transform()
-        horizontal_cylinder_transform.translation = ue.Vector(0, 0, step_height)
-        horizontal_cylinder_transform.rotation = ue.Rotator(0, 90, 0).quaternion()
-
-        ue.GeometryScript_Primitives.append_cylinder(
-            target_mesh=frame_mesh,
-            primitive_options=ue.GeometryScriptPrimitiveOptions(),
-            transform=horizontal_cylinder_transform,
-            radius=radius / 2.0,
-            height=10,
-            radial_steps=6,
-            height_steps=1,
-            capped=True,
-            origin=ue.GeometryScriptPrimitiveOriginMode.CENTER,
-        )
-
-        # Text label for absolute height
-        label_component = ue.TextRenderComponent(outer=frame_actor)
-        label_component.set_editor_property("text", f"{absolute_height:.2f} cm")
-        label_component.set_editor_property("text_render_color", ue.Color(255, 255, 255, 255))  # White text
-        label_component.set_editor_property("world_size", 10.0)
-        label_component.set_editor_property("relative_location", ue.Vector(0, radius * 5.0, step_height))
-        label_component.set_editor_property("horizontal_alignment", ue.HorizTextAligment.EHTA_CENTER)
-
-        # Attach the text component to the root component with explicit rules
-        label_component.attach_to_component(
-            frame_actor.root_component,
-            socket_name="",
-            location_rule=ue.AttachmentRule.SNAP_TO_TARGET,
-            rotation_rule=ue.AttachmentRule.SNAP_TO_TARGET,
-            scale_rule=ue.AttachmentRule.KEEP_WORLD
-        )
-
-    # Notify the actor to rebuild its mesh
-    frame_actor.mark_for_mesh_rebuild()
-
-    ue.log("Reference frame created with GeneratedDynamicMeshActor.")
-
-
-def create_thick_component(blueprint_path, cylinder_diameter=0.3, cylinder_length=2.0, label_distance=2.0):
-    """
-    Create a "Thick" component Blueprint with a StaticMesh cylinder and a TextRenderComponent.
-
-    Args:
-        blueprint_path (str): Path to save the Blueprint in the Content Browser (e.g., "/Game/Blueprints/ThickBP").
-        cylinder_diameter (float): Diameter of the cylinder in cm. Default is 0.3cm.
-        cylinder_length (float): Length of the cylinder in cm. Default is 2cm.
-        label_distance (float): Distance of the TextRenderComponent from the cylinder's origin in cm. Default is 2cm.
-    """
-    # Step 1: Create a new Actor Blueprint
-    asset_tools = ue.AssetToolsHelpers.get_asset_tools()
-    blueprint_factory = ue.BlueprintFactory()
-    blueprint_factory.set_editor_property("parent_class", ue.Actor)
-    blueprint = asset_tools.create_asset(
-        blueprint_path.split("/")[-1],  # Asset Name
-        "/".join(blueprint_path.split("/")[:-1]),  # Asset Path
-        ue.Blueprint,  # Blueprint Class
-        blueprint_factory
-    )
-
-    if not blueprint:
-        ue.log_error(f"Failed to create Blueprint at {blueprint_path}")
-        return None
-
-    # Step 2: Add a StaticMeshComponent for the cylinder
-    cylinder_component = ue.EditorSubsystemLibrary.add_component(
-        blueprint, component_type=ue.StaticMeshComponent, name="CylinderMesh"
-    )
-    if not cylinder_component:
-        ue.log_error("Failed to add StaticMeshComponent to Blueprint.")
-        return None
-
-    # Configure the StaticMeshComponent
-    cylinder_mesh = ue.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cylinder")
-    cylinder_component.set_editor_property("static_mesh", cylinder_mesh)
-    cylinder_component.set_editor_property("mobility", ue.ComponentMobility.STATIC)
-    cylinder_component.set_editor_property("relative_scale3d", ue.Vector(cylinder_diameter, cylinder_diameter, cylinder_length))
-    cylinder_component.set_editor_property("relative_location", ue.Vector(0, 0, cylinder_length / 2))  # Adjust origin
-
-    # Step 3: Add a TextRenderComponent for the label
-    text_render_component = ue.EditorSubsystemLibrary.add_component(
-        blueprint, component_type=ue.TextRenderComponent, name="LabelText"
-    )
-    if not text_render_component:
-        ue.log_error("Failed to add TextRenderComponent to Blueprint.")
-        return None
-
-    # Configure the TextRenderComponent
-    text_render_component.set_editor_property("text", "Label")
-    text_render_component.set_editor_property("text_render_color", ue.LinearColor(1.0, 1.0, 1.0, 1.0))  # White text
-    text_render_component.set_editor_property("world_size", 2.0)  # Adjust size
-    text_render_component.set_editor_property("relative_location", ue.Vector(0, label_distance, 0))
-    text_render_component.attach_to_component(cylinder_component)
-
-    # Step 4: Save the Blueprint
-    ue.EditorAssetLibrary.save_asset(blueprint_path)
-    ue.log(f"Blueprint saved at: {blueprint_path}")
-
-    return blueprint
 
 
 
