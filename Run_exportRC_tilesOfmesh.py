@@ -268,6 +268,7 @@ def write_rcbox(rcbox):
 
 def get_user_input():
     """Prompt user for model details and grid size."""
+    modelname = str(input("Enter official name of model: "))
     total_triangles = int(input("Enter total number of triangles in basemodel: "))
     total_textures = int(input("Enter total number of 8k textures in basemodel: "))
     
@@ -281,13 +282,18 @@ def get_user_input():
     
     return total_triangles, total_textures, min_parts, grid
 
-def export_rcbox(output_path):
+def export_rcbox(outputfolder, modelname):
     """Export the reconstruction region from RealityCapture using RCCommandBuilder."""
+    output_path = os.path.join(outputfolder, f"{modelname}.rcbox")
     builder = RCCommandBuilder()
+    builder.add_command("renameSelectedModel", modelname)
     builder.add_command("exportReconstructionRegion", output_path)
     builder.execute()
+    # Wait for the file to be written
+    wait_for_file(output_path)
     print(f"Exported ReconstructionRegion to: {output_path}")
-    print(f"Exported ReconstructionRegion to: {output_path}")
+    return output_path
+
 
 def clip_mesh_legacy_support(mesh_legacy, point, normal):
     """
@@ -383,13 +389,12 @@ def generate_tiled_rcboxes(rcbox, grid, output_folder):
     tilesOfbox2 = cut_mesh_along_axis(tilesOfaxis1, 2, grid[2])
     print('This is the number of tiles of axis 2:', len(tilesOfbox2))
 
-
-    scandf = pd.DataFrame(columns=["tile_id", "rcbox_path", "processed"])
+    listofrcboxpaths= []
 
     for idx, mesh in enumerate(tilesOfbox2):
         i, j, k = idx % grid[0], (idx // grid[0]) % grid[1], (idx // (grid[0] * grid[1])) % grid[2]
 
-        tile_name = f"tile_x{str(i).zfill(3)}_y{str(j).zfill(3)}_z{str(k).zfill(3)}.rcbox"
+        tile_name = f"tile_x{str(i).zfill(3)}_y{str(j).zfill(3)}_z{str(k).zfill(3)}"
         output_path = os.path.join(output_folder, tile_name)
 
         # Prepare new RCBox metadata as a copy of the original
@@ -401,60 +406,67 @@ def generate_tiled_rcboxes(rcbox, grid, output_folder):
         # Write to file
         tree = write_rcbox(tile_rcbox)
         tree.write(output_path)
-        print(f"Created: {output_path}")
-
-        scandf = scandf.append({"tile_id": tile_name, "rcbox_path": output_path, "processed": False}, ignore_index=True)
-
-    #scandf.to_csv(os.path.join(output_folder, "processing_log.csv"), index=False)
-
-
-
-def process_tiles(processing_log):
-    """Process each tile in RealityCapture using RCCommandBuilder."""
-    scandf = pd.read_csv(processing_log)
+        
+        listofrcboxpaths.append({"tile_id": tile_name, "rcbox_path": output_path, "processed": False})
     
-    for index, tile in scandf.iterrows():
-        if not tile["processed"]:
-            rcbox_path = tile["rcbox_path"]
-            builder = RCCommandBuilder()
-            builder.add_command("importReconstructionRegion", rcbox_path)
-            builder.add_command("selectLargestModelComponent")
-            builder.add_command("simplify", "1000000")
-            builder.add_command("unwrap")
-            builder.add_command("calculateTexture")
-            builder.add_command("exportModel", f"{rcbox_path.replace('.rcbox', '.obj')}")
-            builder.add_command("save")
-            
-            command = ["RealityCapture.exe"] + builder.build().split()
-            subprocess.run(' '.join(command), check=True, shell=True)
-            scandf.at[index, "processed"] = True
-            scandf.to_csv(processing_log, index=False)
+    return listofrcboxpaths
+
+
+
+
+def RCexport_tiles(listofrcboxpaths, outputfolder, modelname):
+    """Process each tile in RealityCapture using RCCommandBuilder."""
+    builder = RCCommandBuilder()
+    for tile in listofrcboxpaths:
+        #if not tile["processed"]:
+        rcbox_path = tile["rcbox_path"]
+        print(f"Processing tile: {rcbox_path}")
+        obj_path = os.path.join(outputfolder, f"{modelname}_{tile['tile_id']}.obj")
+        
+        builder.add_command("selectModel", modelname)
+        builder.add_command("setReconstructionRegion", rcbox_path)
+        builder.add_command("cutByBox", "outer", "false")
+        
+        builder.add_command("cleanModel")
+        builder.add_command("renameSelectedModel", f"{modelname}_{tile['tile_id']}") 
+        #using the current unwrap settings in the RC instance
+        builder.add_command("unwrap")
+        builder.add_command("reprojectTexture", modelname, f"{modelname}_{tile['tile_id']}")
+        builder.add_command("exportModel", f"{modelname}_{tile['tile_id']}", obj_path, "C:/Users/tronc/Documents/GitHub/RCprocessing/export_param_visualtile.xml")
+        # create subfolder for editsubtile
+        subfolder = os.path.join(outputfolder, f"{modelname}_{tile['tile_id']}_editsubtile")
+        Path(subfolder).mkdir(parents=True, exist_ok=True)
+        # editsubtile obj_path
+        editsubtile_obj_path = os.path.join(subfolder, f"{modelname}_{tile['tile_id']}.obj")
+        builder.add_command("exportModel", f"{modelname}_{tile['tile_id']}", editsubtile_obj_path, "C:/Users/tronc/Documents/GitHub/RCprocessing/export_param_editsubtile.xml")
+        #builder.add_command("save")
+    builder.execute()
 
 def main():
     """Main function to execute the RCBox tiling process."""
-
-    output_folder = 'E:/WES_L18_Boat/exportTestd/WES_L18_Boat_tiledexport/'
+    # no user input in dev mode
+    #total_triangles, total_textures, min_parts, grid = get_user_input()
+    modelname = "WES_L18_Boat"
+    grid = (3, 2, 1)  # Set the tiling grid
+    metafolder = 'E:/WES_L18_Boat/exportTestd/WES_L18_Boat_tiledexport/'
+    #create the output folder if not exists
+    output_folder = os.path.join(metafolder, modelname)
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
     processing_log = os.path.join(output_folder, "processing_log.csv")
-    rcbox_path = os.path.join(output_folder, "WES_L18_Boat.rcbox")
+    
 
     # Step 1: Export the RCBox from RealityCapture
-    export_rcbox(rcbox_path)
+    rcbox_path = export_rcbox(output_folder, modelname)
 
-    # Step 2: Read the exported RCBox
+    # Step 2: Read the exported RCBox with open3d
     new_rcbox = read_rcbox(Path(rcbox_path))
-    print('This is the o3d box:', new_rcbox)
 
-    # Step 3: Write the unmodified RCBox to verify integrity
-    #output_path = os.path.join(output_folder, 'test.rcbox')
-    #tree = write_rcbox(new_rcbox)
-    #tree.write(output_path)
+    # Step 3: Generate tiled RCBoxes using the clipping pipeline
+    
+    listofrcboxpaths = generate_tiled_rcboxes(new_rcbox, grid, output_folder)
 
-    # Step 4: Generate tiled RCBoxes using the clipping pipeline
-    grid = (3, 2, 1)  # Set the tiling grid
-    generate_tiled_rcboxes(new_rcbox, grid, output_folder)
-
-    # Step 5: Process the tiled RCBoxes in RealityCapture
-    #process_tiles(processing_log)
+    # Step 4: Process each tile in RealityCapture based on the rcboxes
+    RCexport_tiles(listofrcboxpaths, output_folder, modelname)
 
 if __name__ == "__main__":
     main()
