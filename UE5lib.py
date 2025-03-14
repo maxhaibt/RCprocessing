@@ -458,6 +458,83 @@ def provide_meshdf(folder_path):
     return df
 
 
+def parse_mesh_andsubtiles_directory(mesh_folder):
+    """
+    Parses a directory containing multiple parts of a 3D mesh and organizes the files into a structured list of dictionaries.
+    Ensures .mtl files are correctly assigned to the corresponding .obj files and supports multiple parts.
+    Additionally, it collects 'editsubtile' subfolders and organizes them under their respective tiles, 
+    ensuring OBJ-MTL pairs are correctly mapped within them.
+
+    Parameters:
+    - mesh_folder (str): Path to the directory containing the mesh files.
+
+    Returns:
+    - list: A list of dictionaries, each representing a tile with its OBJ tiles, MTL files, textures, and editsubtiles.
+    """
+    texture_extensions = {".jpg", ".jpeg", ".png", ".tga", ".bmp"}
+    tile_pattern = re.compile(r'(\w+_tile_x\d+_y\d+_z\d+)')
+    
+    mesh_data = defaultdict(lambda: {
+        "partname": None,
+        "OBJAndMtl": [],
+        "textures": [],
+        "editsubtiles": []
+    })
+    
+    obj_mtl_mapping = defaultdict(lambda: {"OBJtile": None, "Mtl": None})
+    
+    file_list = [os.path.normpath(os.path.join(mesh_folder, f)) for f in os.listdir(mesh_folder) if os.path.isfile(os.path.join(mesh_folder, f))]
+    
+    for file_path in file_list:
+        filename = os.path.basename(file_path)
+        base_name, ext = os.path.splitext(filename)
+        
+        match = tile_pattern.search(filename)
+        if not match:
+            continue
+        
+        tile_name = match.group(1)
+        
+        if mesh_data[tile_name]["partname"] is None:
+            mesh_data[tile_name]["partname"] = tile_name
+        
+        if ext == ".obj":
+            obj_mtl_mapping[base_name]["OBJtile"] = file_path
+        elif ext == ".mtl":
+            obj_mtl_mapping[base_name]["Mtl"] = file_path
+        elif ext in texture_extensions:
+            mesh_data[tile_name]["textures"].append(file_path)
+    
+    for base_name, obj_mtl in obj_mtl_mapping.items():
+        match = tile_pattern.search(base_name)
+        if match:
+            tile_name = match.group(1)
+            mesh_data[tile_name]["OBJAndMtl"].append(obj_mtl)
+    
+    for folder in os.listdir(mesh_folder):
+        folder_path = os.path.join(mesh_folder, folder)
+        if os.path.isdir(folder_path) and folder.endswith("_editsubtile"):
+            tile_name = folder.replace("_editsubtile", "")
+            
+            editsubtile_mapping = defaultdict(lambda: {"OBJtile": None, "Mtl": None})
+            
+            for root, _, files in os.walk(folder_path):
+                for file in files:
+                    file_path = os.path.normpath(os.path.join(root, file))
+                    filename = os.path.basename(file_path)
+                    base_name, ext = os.path.splitext(filename)
+                    
+                    if ext == ".obj":
+                        editsubtile_mapping[base_name]["OBJtile"] = file_path
+                    elif ext == ".mtl":
+                        editsubtile_mapping[base_name]["Mtl"] = file_path
+            
+            mesh_data[tile_name]["editsubtile"] = list(editsubtile_mapping.values())
+    
+    return list(mesh_data.values())
+
+
+
 
 def parse_mesh_directory(mesh_folder):
     """

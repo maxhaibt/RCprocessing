@@ -15,26 +15,62 @@ importlib.reload(my_module)
 ue.log('How are You?')
 
 config = UE5lib.loadconfigs('C:/Users/tronc/Documents/GitHub/RCprocessing/config_boattiles.json')
-meshdf = UE5lib.parse_mesh_directory(config['meshfolder'])
+meshdf = UE5lib.parse_mesh_andsubtiles_directory(config['meshfolder'])
+#meshdf = UE5lib.parse_mesh_directory(config['meshfolder'])
 #print number of parts
 print(len(meshdf))
+print(type(meshdf))
+#print list of dicts pretty
+#for part in meshdf:
+print(meshdf[0])
+#print(meshdf)
+#stop script
+#sys.exit()
 for part in meshdf: 
     
     texturetask = UE5lib.build_import_texture_tasks(part['textures'], config['UEdestination'])
     UE5lib.import_asset(texturetask)
         #print(texturetask[0].imported_object_paths)
-    if not ue.EditorAssetLibrary.does_asset_exist(config['UEdestination'] + '/' + part['partname']):
-        materialinstance_part = UE5lib.create_constant_material_instance(config['UEbasematerialpath'], config['UEdestination'], part['partname'], texturetask[0].imported_object_paths[0])
+    #if not ue.EditorAssetLibrary.does_asset_exist(config['UEdestination'] + '/' + part['partname']):
+    materialinstance_part = UE5lib.create_constant_material_instance(config['UEbasematerialpath'], config['UEdestination'], part['partname'] + '_maerial', texturetask[0].imported_object_paths[0])
 
     #importedtextureref=
     texture_params = list(materialinstance_part.texture_parameter_values)
     for param in texture_params:
         print(param.parameter_info.name, 'is already in the list.')
-    tilesfolder = config['UEdestination'] + part['partname'] + '_tiles'  
+    
+    mtldf = UE5lib.parse_mtl(part['OBJAndMtl'][0]['Mtl'])
+    #print('mtldf')
+    print('this is',mtldf)
+    mtldf_modified = UE5lib.modify_mtl(mtldf)
+    UE5lib.write_mtl(mtldf_modified, part['OBJAndMtl'][0]['Mtl'])
+    obj = part['OBJAndMtl'][0]["OBJtile"]
+    
+    print('the meshtile path to obj',obj)
+    options = UE5lib.build_meshtile_import_options()
+
+    meshtask = UE5lib.build_meshtile_import_tasks(obj , config['UEdestination'], options)
+    imported_tiles = UE5lib.import_asset(meshtask)
+    imported_mesh_path = meshtask[0].imported_object_paths[0]
+    print('this is the imported mesh path',imported_mesh_path)
+    imported_mesh = ue.EditorAssetLibrary.load_asset(imported_mesh_path)
+
+    if not imported_mesh:
+        ue.log_error(f"Failed to import mesh: {imported_mesh_path}")
+
+    ue.log(f"Imported mesh: {imported_mesh_path}")
+
+    # Assign the material to the first material slot of the mesh
+    imported_mesh.set_material(0, materialinstance_part)
+
+
+    ue.log(f"Material assigned successfully to: {imported_mesh_path}")
+    tilesfolder = config['UEdestination'] + part['partname'] + '_editsubtiles'  
     if not ue.EditorAssetLibrary.does_directory_exist(tilesfolder):
         ue.EditorAssetLibrary.make_directory(tilesfolder)
-    for tile in part['OBJtilesAndMtls']:
-        print(tile)
+    for tile in part['editsubtile']:
+        print('this is the tile',tile)
+        #print(tile)
         mtldf = UE5lib.parse_mtl(tile["Mtl"])
         print('Goeshere')
         print('this is',mtldf)
@@ -58,9 +94,11 @@ for part in meshdf:
         imported_mesh.set_material(0, materialinstance_part)
 
         # Save the changes
-        ue.EditorAssetLibrary.save_asset(imported_mesh_path)
+        
 
         ue.log(f"Material assigned successfully to: {imported_mesh_path}")
+    ue.EditorAssetLibrary.save_asset(imported_mesh_path)
+    #sys.exit()
 
     
 

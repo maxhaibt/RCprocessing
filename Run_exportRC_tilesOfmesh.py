@@ -161,11 +161,18 @@ def read_rcbox(rcbox_path):
     print("[DEBUG] Parsed XML content:\n", ET.tostring(root, encoding="unicode"))
 
     # Extract width, height, depth from the element
-    width_height_depth_element = root.find("widthHeightDepth")
-    if width_height_depth_element is None or width_height_depth_element.text is None:
-        raise ValueError(f"[ERROR] 'widthHeightDepth' element is missing in file: {rcbox_path}")
+    width_height_depth = root.find("widthHeightDepth")
+    if width_height_depth is None or width_height_depth.text is None:
+        width_height_depth = root.get("widthHeightDepth")
+        if width_height_depth is None:
+            raise ValueError(f"[ERROR] 'widthHeightDepth' attribute or element is missing in file: {rcbox_path}")
+        else:
+            print('this is the width_height_depth from attribute:', width_height_depth)
+            width_RC, height_RC, depth_RC = [float(val) for val in width_height_depth.split()]
 
-    depth_RC, width_RC, height_RC = [float(val) for val in width_height_depth_element.text.split()]
+    else:
+        print('this is the width_height_depth from element:', width_height_depth.text)
+        width_RC, height_RC, depth_RC = [float(val) for val in width_height_depth.text.split()]
 
     # Extract center coordinates
     centre_element = root.find("CentreEuclid/centre")
@@ -186,7 +193,7 @@ def read_rcbox(rcbox_path):
 
     # Create the box
     cube_legacy = o3d.geometry.TriangleMesh.create_box(
-        width=depth_RC, height=width_RC, depth=height_RC
+        width=width_RC, height=height_RC, depth=depth_RC
     )
     cube_legacy.translate(-cube_legacy.get_center())  # Center at origin
 
@@ -231,8 +238,8 @@ def write_rcbox(rcbox):
     print('This should be 0,0,0:', rcbox_local['geometry'].get_center())
 
     bounds = rcbox_local['geometry'].get_axis_aligned_bounding_box().get_extent()
-    depth, width, height = np.array(bounds, dtype=np.float64)
-    check_dtype("Bounding Box Dimensions", np.array([depth, width, height]))
+    width, height, depth = np.array(bounds, dtype=np.float64)
+    check_dtype("Bounding Box Dimensions", np.array([ width, height, depth]))
 
     rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
     yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
@@ -246,8 +253,8 @@ def write_rcbox(rcbox):
         'isLatLon': "0"
     })
 
-    ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
-    ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
+    ET.SubElement(root, "yawPitchRoll").text = f" {-pitch} {-roll} {-yaw} "
+    ET.SubElement(root, "widthHeightDepth").text = f"{width} {height} {depth}"
     ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
 
     centre_euclid = ET.SubElement(root, "CentreEuclid")
@@ -280,7 +287,7 @@ def get_user_input():
     grid_input = input("Enter tiling grid as NxMxL (e.g., 6x2x1): ")
     grid = tuple(map(int, grid_input.split('x')))
     
-    return total_triangles, total_textures, min_parts, grid
+    return modelname, total_triangles, total_textures, min_parts, grid
 
 def export_rcbox(outputfolder, modelname):
     """Export the reconstruction region from RealityCapture using RCCommandBuilder."""
@@ -395,7 +402,7 @@ def generate_tiled_rcboxes(rcbox, grid, output_folder):
         i, j, k = idx % grid[0], (idx // grid[0]) % grid[1], (idx // (grid[0] * grid[1])) % grid[2]
 
         tile_name = f"tile_x{str(i).zfill(3)}_y{str(j).zfill(3)}_z{str(k).zfill(3)}"
-        output_path = os.path.join(output_folder, tile_name)
+        output_path = os.path.join(output_folder, tile_name +'.rcbox')
 
         # Prepare new RCBox metadata as a copy of the original
         tile_rcbox = rcbox.copy()
@@ -445,9 +452,9 @@ def RCexport_tiles(listofrcboxpaths, outputfolder, modelname):
 def main():
     """Main function to execute the RCBox tiling process."""
     # no user input in dev mode
-    #total_triangles, total_textures, min_parts, grid = get_user_input()
-    modelname = "WES_L18_Boat"
-    grid = (3, 2, 1)  # Set the tiling grid
+    modelname, total_triangles, total_textures, min_parts, grid = get_user_input()
+    print('this is all user input:', total_triangles, total_textures, min_parts, grid)
+    #grid = (3, 2, 1)  # Set the tiling grid
     metafolder = 'E:/WES_L18_Boat/exportTestd/WES_L18_Boat_tiledexport/'
     #create the output folder if not exists
     output_folder = os.path.join(metafolder, modelname)
@@ -460,13 +467,15 @@ def main():
 
     # Step 2: Read the exported RCBox with open3d
     new_rcbox = read_rcbox(Path(rcbox_path))
+    newrcbox_xmltree = write_rcbox(new_rcbox)
+    newrcbox_xmltree.write(output_folder + '/checkresultofread_new_rcbox.rcbox')
 
     # Step 3: Generate tiled RCBoxes using the clipping pipeline
     
     listofrcboxpaths = generate_tiled_rcboxes(new_rcbox, grid, output_folder)
 
     # Step 4: Process each tile in RealityCapture based on the rcboxes
-    RCexport_tiles(listofrcboxpaths, output_folder, modelname)
+    #RCexport_tiles(listofrcboxpaths, output_folder, modelname)
 
 if __name__ == "__main__":
     main()
