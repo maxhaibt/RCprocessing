@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 from pathlib import Path
 import open3d as o3d
+import open3d.visualization.rendering as rendering
 #from RClib import read_rcbox, write_rcbox
 
 class RCCommandBuilder:
@@ -85,11 +86,17 @@ def transform_to_global(rcbox):
 
 
 def persistent_translate(rcbox, x, y, z):
+    np.set_printoptions(precision=15, suppress=False)
+    print('this is the translation:', x, y, z)
     translation_matrix = np.array([x, y, z], dtype=np.float64)
     check_dtype("Translation matrix", translation_matrix)
+    print('persistent translation matrix:', translation_matrix)
+
+    # Ensure Open3D maintains float64 precision
+    translation_matrix = o3d.utility.Vector3dVector(translation_matrix.reshape(1, 3))[0]
 
     rcbox['geometry'].translate(translation_matrix, relative=True)
-    rcbox['transform_to_local']['translation_matrix'] = rcbox['transform_to_local']['translation_matrix'] - translation_matrix
+    rcbox['transform_to_local']['translation_matrix'] -= translation_matrix
 
     check_dtype("Updated Translation Matrix", rcbox['transform_to_local']['translation_matrix'])
     return rcbox
@@ -233,15 +240,16 @@ def rotation_matrix_to_euler_angles(R):
 
 def write_rcbox(rcbox):
     x, y, z = rcbox['geometry'].get_center()
-
-    rcbox_local = transform_to_local(rcbox)
+    rcbox_local = rcbox.copy()
+    rcbox_local['geometry'] = o3d.geometry.TriangleMesh(rcbox['geometry'])
+    rcbox_local = transform_to_local(rcbox_local)
     print('This should be 0,0,0:', rcbox_local['geometry'].get_center())
 
     bounds = rcbox_local['geometry'].get_axis_aligned_bounding_box().get_extent()
     width, height, depth = np.array(bounds, dtype=np.float64)
     check_dtype("Bounding Box Dimensions", np.array([ width, height, depth]))
 
-    rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
+    rotation_matrix = rcbox_local['transform_to_local']['rotation_matrix']
     yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
     yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
 
@@ -354,6 +362,7 @@ def cut_mesh_along_axis(mesh_list, axis, steps):
     min_bound = mesh_list[0].get_min_bound()[axis]
     max_bound = mesh_list[0].get_max_bound()[axis]
     step_size = (max_bound - min_bound) / steps
+    #print all the details of the cutting pla
 
     result_meshes = []
     
@@ -372,47 +381,71 @@ def cut_mesh_along_axis(mesh_list, axis, steps):
     result_meshes.extend(mesh_list)  # Add remaining parts
     return result_meshes
 
+def transform_to_global(rcbox):
+    """Transforms the RCBox back to global space."""
+    translation = rcbox['transform_to_local']['translation_matrix']
+    rotation = rcbox['transform_to_local']['rotation_matrix']
+    
+    # Apply inverse translation first
+    rcbox['geometry'].translate(-translation, relative=True)
+    
+    # Apply inverse rotation around the same implicit center
+    rcbox['geometry'].rotate(rotation.T, center=-translation)
+
+    return rcbox
+
 def generate_tiled_rcboxes(rcbox, grid, output_folder):
     """
     Generates **tiled RCBoxes** by slicing an input mesh along all three axes.
     Saves the results as individual .rcbox files with structured filenames.
     """
+    np.set_printoptions(precision=15, suppress=False)
     Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-
-
+    rcbox_local = rcbox.copy()
     # Transform the mesh to local space
-    rcbox_local = transform_to_local(rcbox)
-    print('This is the transformed local RCBox:', rcbox_local)
+    rcbox_local = transform_to_local(rcbox_local)
 
 
     mesh_list = [rcbox_local['geometry']]  # Start with one full box
-    #Allaxis_tiles = []
+    #get the height, width and depth of the box and print it
+    bounds = rcbox_local['geometry'].get_axis_aligned_bounding_box().get_extent()
+
 
     tilesOfaxis0 = cut_mesh_along_axis(mesh_list, 0, grid[0])
-    print('This is the number of tiles of axis 0:', len(tilesOfaxis0))
     tilesOfaxis1 = cut_mesh_along_axis(tilesOfaxis0, 1, grid[1])
-    print('This is the number of tiles of axis 1:', len(tilesOfaxis1))
-    tilesOfbox2 = cut_mesh_along_axis(tilesOfaxis1, 2, grid[2])
-    print('This is the number of tiles of axis 2:', len(tilesOfbox2))
+    tilesOfaxis2 = cut_mesh_along_axis(tilesOfaxis1, 2, grid[2])
+
 
     listofrcboxpaths= []
+    # For visualization using the material
+    material = rendering.MaterialRecord()
+    material.shader = 'defaultUnlit'
+    o3d.visualization.draw([{'name': 'tiledboxes', 'geometry': tilesOfaxis2[0], 'material': material}]) 
 
-    for idx, mesh in enumerate(tilesOfbox2):
+    for idx, mesh in enumerate(tilesOfaxis2):
         i, j, k = idx % grid[0], (idx // grid[0]) % grid[1], (idx // (grid[0] * grid[1])) % grid[2]
 
         tile_name = f"tile_x{str(i).zfill(3)}_y{str(j).zfill(3)}_z{str(k).zfill(3)}"
         output_path = os.path.join(output_folder, tile_name +'.rcbox')
 
         # Prepare new RCBox metadata as a copy of the original
-        tile_rcbox = rcbox.copy()
-        tile_rcbox['geometry'] = mesh
+        tile_rcbox = rcbox_local.copy()
+        tile_rcbox['geometry'] = o3d.geometry.TriangleMesh(mesh)
+        local_centeroftile = tile_rcbox['geometry'].get_center()
         tile_rcbox = transform_to_global(tile_rcbox)
-
+        #the transformationtolocal values in the tile_rcbox must be updated
+        # calculate rotation matrix from Open3D object
+        obb = tile_rcbox['geometry'].get_minimal_oriented_bounding_box()
+        rotationMTile = obb.R
+        tile_rcbox['transform_to_local']['rotation_matrix'] = rotationMTile.T
+        tile_rcbox['transform_to_local']['translation_matrix'] = -1 * tile_rcbox['geometry'].get_center()
 
         # Write to file
         tree = write_rcbox(tile_rcbox)
         tree.write(output_path)
+        #destroy the tile_rcbox
+        del tile_rcbox
         
         listofrcboxpaths.append({"tile_id": tile_name, "rcbox_path": output_path, "processed": False})
     
@@ -450,6 +483,8 @@ def RCexport_tiles(listofrcboxpaths, outputfolder, modelname):
     builder.execute()
 
 def main():
+
+    np.set_printoptions(precision=15, suppress=False)
     """Main function to execute the RCBox tiling process."""
     # no user input in dev mode
     modelname, total_triangles, total_textures, min_parts, grid = get_user_input()
@@ -467,6 +502,7 @@ def main():
 
     # Step 2: Read the exported RCBox with open3d
     new_rcbox = read_rcbox(Path(rcbox_path))
+    print('this is the translation to local after import:', new_rcbox['transform_to_local']['translation_matrix'])
     newrcbox_xmltree = write_rcbox(new_rcbox)
     newrcbox_xmltree.write(output_folder + '/checkresultofread_new_rcbox.rcbox')
 
