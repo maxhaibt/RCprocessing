@@ -1,39 +1,26 @@
 
-#import pyproj
-#pyproj.datadir.set_data_dir('C:/Users/mhaibt/Anaconda3/envs/orthobox_env/Library/share/proj/')
+# stdlib
+from pathlib import Path
+import threading
+import xml.etree.ElementTree as ET
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+# scientific/geo
 import numpy as np
 import geopandas as gpd
-from pathlib import Path
-from shapely.geometry import box, Polygon
+from shapely.geometry import box, Polygon, LineString
 from shapely.affinity import rotate
-import xml.etree.ElementTree as ET
-#from osgeo import gdal, gdal_array
-import gdal
-from shapely.geometry import LineString
-from tkinter import filedialog, messagebox
+
+# rasterio (public APIs only)
 import rasterio
-import rasterio._shim
-import rasterio._base
-import rasterio.rpc
-import rasterio.control
-import rasterio.crs
-import rasterio.sample
-import rasterio.vrt
-import rasterio._features
-from rasterio.warp import calculate_default_transform, reproject, Resampling
-from affine import Affine
-import threading
-import tkinter as tk
-from tkinter import ttk
-from rasterio.transform import from_origin
 from rasterio.env import Env
+from rasterio.transform import from_origin
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 
-
-
-
-import rasterio
+from affine import Affine
 from pyproj import CRS
-from rasterio.warp import calculate_default_transform
+from osgeo import gdal
 
 def process_files(file_paths, progress, status, should_continue, root):
     epsg_code = ask_for_epsg(root)

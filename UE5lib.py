@@ -713,20 +713,48 @@ def build_import_options(texturestemname: str, basematerial):
 
 def build_meshtile_import_options():
     options = ue.FbxImportUI()
-    #print(options.get_editor_property('static_mesh_import_data'))
-    # ue.FbxImportUI
+    
+    # General FBX Import UI options
     options.set_editor_property("import_mesh", True)
     options.set_editor_property("is_obj_import", True)
     options.set_editor_property("import_textures", False)
     options.set_editor_property("import_materials", False)
-    #options.import_as_skeletal = True
-    #ue.FbxMeshImportData
-    #ue.log(options.get_editor_property("is_obj_import"))
-    options.static_mesh_import_data.set_editor_properties({'import_uniform_scale': 100.0})
-    options.static_mesh_import_data.set_editor_properties({'build_nanite': True}) 
-    # Texture options
-                                     
+    options.set_editor_property("import_as_skeletal", False)
+    options.set_editor_property("automated_import_should_detect_type", False)
+
+    # Static Mesh Import Data (FbxStaticMeshImportData)
+    static_mesh_options = options.static_mesh_import_data
+    static_mesh_options.set_editor_properties({
+        'import_mesh_lo_ds': False,
+        'combine_meshes': False,
+        'auto_generate_collision': True,
+        'generate_lightmap_u_vs': True,
+        'build_nanite': True,
+        'build_reversed_index_buffer': False,
+        'remove_degenerates': True,
+        'bake_pivot_in_vertex': False,
+        'transform_vertex_to_absolute': False,
+        'convert_scene': True,
+        'convert_scene_unit': True,
+        'import_uniform_scale': 1.0,
+        'force_front_x_axis': False,
+        'distance_field_resolution_scale': 1.0,
+        'reorder_material_to_fbx_order': True,
+        'static_mesh_lod_group': ue.Name("None"),
+        'vertex_color_import_option': ue.VertexColorImportOption.IGNORE,
+        'vertex_override_color': ue.LinearColor(1.0, 1.0, 1.0, 1.0),  # White (RGBA)
+        'compute_weighted_normals': False,
+        'import_rotation': ue.Rotator(0.0, 0.0, 0.0),
+        'import_translation': ue.Vector(0.0, 0.0, 0.0),
+        'one_convex_hull_per_ucx': False
+    })
+
+    # Normals & Tangents
+    static_mesh_options.set_editor_property("normal_import_method", ue.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
+    static_mesh_options.set_editor_property("normal_generation_method", ue.FBXNormalGenerationMethod.MIKKT_SPACE)
+
     return options
+
 
 def build_fbxfactory(task):
     fbxfactory = ue.FbxFactory()
@@ -748,7 +776,7 @@ def build_import_tasks(filename: str, texture_files: list, destination_path: str
     obj_task.set_editor_property("automated", True)
     obj_task.set_editor_property("destination_path", destination_path)
     obj_task.set_editor_property("filename", filename)
-    obj_task.set_editor_property("replace_existing", True)
+    obj_task.set_editor_property("replace_existing", False)
     obj_task.set_editor_property("replace_existing_settings", True)
     obj_task.set_editor_property("options", options)
     fbxfactory = build_fbxfactory(obj_task)
@@ -1478,7 +1506,183 @@ def assign_texture_to_constant_material(material_instance, texture_path: str):
     ue.log(f"Texture assigned successfully to material instance: {material_instance.get_path_name()}")
     ue.EditorLoadingAndSavingUtils.unload_unused_assets()
 
+def spawn_static_mesh_in_level(static_mesh_path, spawn_location=ue.Vector(0, 0, 0)):
+    # Step 1: Load the StaticMesh asset from the Content Browser
+    static_mesh = ue.EditorAssetLibrary.load_asset(static_mesh_path)
+    
+    if not static_mesh:
+        ue.log_error(f"Failed to load StaticMesh from {static_mesh_path}")
+        return
+
+    # Step 2: Spawn the StaticMeshActor in the level at the specified location
+    editor_level_lib = ue.EditorLevelLibrary()
+    
+    # Spawn the actor at the given spawn location
+    static_mesh_actor = editor_level_lib.spawn_actor_from_class(ue.StaticMeshActor, spawn_location)
+    
+    if static_mesh_actor:
+        # Set the StaticMesh of the actor's StaticMeshComponent
+        static_mesh_component = static_mesh_actor.get_component_by_class(ue.StaticMeshComponent)
+        if static_mesh_component:
+            static_mesh_component.set_static_mesh(static_mesh)
+            ue.log(f"Spawned StaticMeshActor with {static_mesh_path} at location {spawn_location}")
+        else:
+            ue.log_error(f"Failed to get StaticMeshComponent from actor: {static_mesh_actor.get_name()}")
+    else:
+        ue.log_error(f"Failed to spawn StaticMeshActor at {spawn_location}")
+    
+    return static_mesh_actor
+
+
+def copy_static_mesh_to_dynamic_mesh(actor):
+    # Get the StaticMeshComponent from the actor
+    static_mesh_component = actor.get_component_by_class(ue.StaticMeshComponent)
+    
+    if not static_mesh_component:
+        ue.log_error(f"Actor {actor.get_name()} does not have a StaticMeshComponent")
+        return None
+    ue.log(f"StaticMeshComponent found {static_mesh_component}")
+    # Get the StaticMesh assigned to the StaticMeshComponent
+    static_mesh = static_mesh_component.static_mesh
+    
+    if not static_mesh:
+        ue.log_error(f"StaticMeshComponent of actor {actor.get_name()} has no StaticMesh assigned")
+        return None
+
+    # Step 1: Create a new DynamicMesh
+    dynamic_mesh = ue.DynamicMesh()
+
+    # Step 2: Copy the mesh data from StaticMesh to DynamicMesh
+    # Required GeometryScript setup
+    #lod = ue.GeometryScriptMeshReadLOD()  # Level of Detail (LOD) 0
+    options = ue.GeometryScriptCopyMeshFromAssetOptions(apply_build_settings = False, request_tangents= False, ignore_remove_degenerates= False, use_build_scale= False)
+    lod = ue.GeometryScriptMeshReadLOD()
+    dynamic_mesh, outcome = ue.GeometryScript_AssetUtils.copy_mesh_from_static_mesh_v2(
+        from_static_mesh_asset=static_mesh,
+        to_dynamic_mesh=dynamic_mesh,
+        asset_options = options,
+        requested_lod = lod,
+        use_section_materials = False,
+        debug = None
+
+        )
+
+    ue.log(f"This is the outcome_pins: {outcome}")
+
+    #ue.log(f"Successfully copied StaticMesh to DynamicMesh for actor {actor.get_name()}")
+    
+    # Return the dynamic mesh
+    return dynamic_mesh
+
+def spawn_dynamic_mesh_actor_from_static_mesh(actor):
+    # Copy the StaticMesh to a DynamicMesh
+    dynamic_mesh = copy_static_mesh_to_dynamic_mesh(actor)
+    
+    if not dynamic_mesh:
+        return None
+
+    # Spawn a new DynamicMeshActor in the level
+    editor_level_lib = ue.EditorLevelLibrary()
+    spawn_location = actor.get_actor_location()  # Spawn at the actor's location
+
+    dyn_actor = editor_level_lib.spawn_actor_from_class(ue.DynamicMeshActor, spawn_location)
+    
+    if not dyn_actor:
+        ue.log_error(f"Failed to spawn DynamicMeshActor for actor {actor.get_name()}")
+        return None
+
+    # Set the dynamic mesh to the actor's DynamicMeshComponent
+    dyn_comp = dyn_actor.get_component_by_class(ue.DynamicMeshComponent)
+    
+    if dyn_comp:
+        dyn_comp.set_dynamic_mesh(dynamic_mesh)
+        ue.log(f"DynamicMesh assigned to DynamicMeshActor for {actor.get_name()}")
+    else:
+        ue.log_error(f"DynamicMeshComponent not found in DynamicMeshActor {dyn_actor.get_name()}")
+    ue.EditorLevelLibrary.destroy_actor(actor)
+    return dyn_actor
+
+def create_dynamic_mesh_actors_from_part(parentlevel, edittile_folder):
+
+    editor_level_lib = ue.EditorLevelLibrary()
+    asset_registry = ue.AssetRegistryHelpers.get_asset_registry()
+    editor_asset_lib = ue.EditorAssetLibrary()
+    editor_level_utils = ue.EditorLevelUtils()
+
+
+    # Step 4: Find all Static Mesh assets in the edittile folder
+    static_mesh_assets = asset_registry.get_assets_by_path(edittile_folder, recursive=True)
+    #static_mesh_assets = [a for a in static_mesh_assets if a.asset_class == 'StaticMesh']
+
+    if not static_mesh_assets:
+        ue.log(f"No Static Meshes found in folder: {edittile_folder}")
+        return
+
+    # Step 5: Spawn Dynamic Mesh Actors for each static mesh asset
+    for asset in static_mesh_assets:
+        ue.log(f"Processing asset: {asset.package_name}")
+        actor = spawn_static_mesh_in_level(asset.package_name, spawn_location=ue.Vector(0, 0, 0))
+        dynamic_mesh_actor = spawn_dynamic_mesh_actor_from_static_mesh(actor)
+    success = editor_level_lib.save_current_level()
+        
+    if success:
+        ue.log(f"Level and its dynamic actors saved successfully.")
+
+def get_actor_by_name(actor_name):
+    # Get all actors in the current level
+    all_actors = ue.EditorLevelLibrary.get_all_level_actors()
+
+    # Iterate over the actors and find the one with the specified name
+    for actor in all_actors:
+        ue.log(f"Actor name: {actor.get_actor_label()}")
+        if actor.get_actor_label() == actor_name:
+            return actor
+
+    # If no actor is found with the specified name
+    ue.log_error(f"Actor with name '{actor_name}' not found in the level.")
+    return None
 
 
 
+def convert_testcube_to_dynamic_mesh():
+    # Find the actor named 'TestCube' in the level
+    test_cube_actor = None
+    test_cube_actor = get_actor_by_name("TestCube")
 
+
+    
+    if not test_cube_actor:
+        ue.log_error("TestCube actor not found in the level.")
+        return
+
+    # Copy the StaticMesh to a DynamicMesh
+    dynamic_mesh = copy_static_mesh_to_dynamic_mesh(test_cube_actor)
+    
+    if not dynamic_mesh:
+        ue.log_error(f"Failed to convert StaticMesh of actor '{test_cube_actor.get_name()}' to DynamicMesh.")
+        return
+
+    # Spawn a new DynamicMeshActor in the level
+    editor_level_lib = ue.EditorLevelLibrary()
+    spawn_location = test_cube_actor.get_actor_location()  # Spawn at the actor's location
+
+    dyn_actor = editor_level_lib.spawn_actor_from_class(ue.DynamicMeshActor, spawn_location)
+    
+    if not dyn_actor:
+        ue.log_error(f"Failed to spawn DynamicMeshActor for TestCube.")
+        return
+
+    # Set the dynamic mesh to the actor's DynamicMeshComponent
+    dyn_comp = dyn_actor.get_component_by_class(ue.DynamicMeshComponent)
+    
+    if dyn_comp:
+        dyn_comp.set_dynamic_mesh(dynamic_mesh)
+        ue.log(f"DynamicMesh assigned to DynamicMeshActor for TestCube.")
+    else:
+        ue.log_error(f"DynamicMeshComponent not found in DynamicMeshActor {dyn_actor.get_name()}.")
+    
+    # Destroy the original TestCube StaticMesh actor
+    ue.EditorLevelLibrary.destroy_actor(test_cube_actor)
+    ue.log("TestCube actor destroyed after conversion.")
+    
+    return dyn_actor

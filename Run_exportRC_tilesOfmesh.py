@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 from pathlib import Path
 import open3d as o3d
-import open3d.visualization.rendering as rendering
+#import open3d.visualization.rendering as rendering
 #from RClib import read_rcbox, write_rcbox
 
 class RCCommandBuilder:
@@ -120,33 +120,16 @@ def localspace_rotation(rcbox, yaw, pitch, roll):
 
 
 
-def wait_for_file(file_path, timeout=30, check_interval=0.5):
-    """
-    Waits for a file to be fully written by checking its existence and stability.
-    
-    :param file_path: Path to the file.
-    :param timeout: Maximum time to wait in seconds.
-    :param check_interval: Time between file existence checks.
-    :return: True if file is ready, raises an error otherwise.
-    """
-    start_time = time.time()
-    last_size = -1
-    
-    while time.time() - start_time < timeout:
-        if os.path.exists(file_path):
-            current_size = os.path.getsize(file_path)
-            if current_size > 0 and current_size == last_size:
-                print(f"File '{file_path}' is stable and ready for reading.")
-                return True
-            last_size = current_size
-        time.sleep(check_interval)
-    
-    raise TimeoutError(f"File '{file_path}' did not become available within {timeout} seconds.")
 
-import time
-import xml.etree.ElementTree as ET
-import numpy as np
-import open3d as o3d
+
+def vis_mesh(mesh):
+    # For visualization using the material
+    material = rendering.MaterialRecord()
+    material.shader = 'defaultLit'
+    #material.albedo_img = img
+    #frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=mesh.get_center())
+    #frame.translate((1, 0, 0))
+    o3d.visualization.draw(mesh) 
 
 def read_rcbox(rcbox_path):
     if not rcbox_path.is_file():
@@ -203,6 +186,8 @@ def read_rcbox(rcbox_path):
         width=width_RC, height=height_RC, depth=depth_RC
     )
     cube_legacy.translate(-cube_legacy.get_center())  # Center at origin
+    #visualize the cube
+    #vis_mesh(cube_legacy)
 
     rcbox = {
         "name": rcbox_path.stem,
@@ -239,7 +224,7 @@ def rotation_matrix_to_euler_angles(R):
     return [yaw, pitch, roll]
 
 def write_rcbox(rcbox):
-    x, y, z = rcbox['geometry'].get_center()
+    x, y, z = np.array(rcbox['geometry'].get_center(), dtype=np.float64)
     rcbox_local = rcbox.copy()
     rcbox_local['geometry'] = o3d.geometry.TriangleMesh(rcbox['geometry'])
     rcbox_local = transform_to_local(rcbox_local)
@@ -262,7 +247,78 @@ def write_rcbox(rcbox):
     })
 
     ET.SubElement(root, "yawPitchRoll").text = f" {-pitch} {-roll} {-yaw} "
-    ET.SubElement(root, "widthHeightDepth").text = f"{width} {height} {depth}"
+    ET.SubElement(root, "widthHeightDepth").text = f"{width} {depth} {height} "
+    ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
+
+    centre_euclid = ET.SubElement(root, "CentreEuclid")
+    print('writing center:', x, y, z)
+    ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
+
+    ET.SubElement(root, "Residual", {
+        'R': "1 0 0 0 1 0 0 0 1",
+        't': "0 0 0",
+        's': "1",
+        'ownerId': "{2B36705F-74C9-4270-BED3-074F279D427B}"
+    })
+
+    tree = ET.ElementTree(root)
+    return tree
+
+def write_rcbox_mobb(rcbox):
+    """
+    Computes an Oriented Bounding Box (OBB) with minimal offset issues.
+    
+    Parameters:
+        mesh (o3d.geometry.TriangleMesh): The input 3D mesh.
+
+    Returns:
+        obb (o3d.geometry.OrientedBoundingBox): The corrected OBB.
+    """
+    # Ensure the mesh is well-defined
+    mesh = o3d.geometry.TriangleMesh(rcbox['geometry'])
+    mesh.remove_duplicated_vertices()
+    mesh.remove_duplicated_triangles()
+    mesh.compute_vertex_normals()
+
+    # Step 1: Center the mesh at the origin before computing the OBB
+    original_center = mesh.get_center()
+    mesh.translate(-original_center, relative=True)  # Move mesh to origin
+    print('Mesh Center at Origin:', mesh.get_center())
+
+    # Step 2: Compute OBB on a clean convex hull
+    #pcd = mesh.sample_points_uniformly(1000)  # Convert mesh to point cloud
+    #hull, _ = pcd.compute_convex_hull()
+    obb = mesh.get_oriented_bounding_box()
+    print('OBB Center at Origin:', obb.get_center())
+
+    # Step 3: Move the OBB back to the original position
+    obb.translate(original_center, relative=True)
+
+
+    # Debugging outputs
+    print("------ OBB Center Debugging ------")
+    print(f"Original Mesh Center: {original_center}")
+    print(f"Computed OBB Center (Open3D): {obb.get_center()}")
+
+    rotation_matrix= obb.R
+    width, height, depth = obb.extent
+    print('this is the extent:', obb.extent)
+    x,y,z = original_center
+
+    
+    yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
+    yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
+
+    root = ET.Element('ReconstructionRegion', {
+        'globalCoordinateSystem': rcbox['globalCoordinateSystem'],
+        'globalCoordinateSystemWkt': 'PROJCS["WGS_1984_UTM_Zone_38N",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["Scale_Factor",0.9996],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]',
+        'globalCoordinateSystemName': rcbox['globalCoordinateSystemName'],
+        'isGeoreferenced': "1",
+        'isLatLon': "0"
+    })
+
+    ET.SubElement(root, "yawPitchRoll").text = f" {yaw} {pitch} {roll} "
+    ET.SubElement(root, "widthHeightDepth").text = f" {width} {height} {depth} "
     ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
 
     centre_euclid = ET.SubElement(root, "CentreEuclid")
@@ -280,6 +336,7 @@ def write_rcbox(rcbox):
     return tree
 
     
+
 
 def get_user_input():
     """Prompt user for model details and grid size."""
@@ -394,6 +451,46 @@ def transform_to_global(rcbox):
 
     return rcbox
 
+
+
+def vismeshes(mesh_list):
+    """
+    Renders a list of Open3D meshes with textures and reference points if provided.
+    
+    Parameters:
+        mesh_list (list): List of Open3D TriangleMesh objects to render.
+        reference_points (pandas.DataFrame, optional): DataFrame with 'x', 'y', 'z' reference points.
+    """
+    if not mesh_list:
+        print("No meshes to display!")
+        return
+
+    vis_objects = []
+
+    # Create coordinate frame for reference
+    #frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=(0, 0, 0))
+    #frame.translate((10, 10, 20))
+    #vis_objects.append(frame)
+
+    # Apply texture material to meshes
+    material = rendering.MaterialRecord()
+    material.shader = 'defaultLit'  # Enables lighting & shading
+
+    for index, mesh in enumerate(mesh_list):
+        mesh.compute_vertex_normals()  # Improve shading
+        vis_objects.append({'name': 'mesh_' + str(index), 'geometry': mesh, 'material': material})
+
+
+
+        
+
+    # Render the meshes interactively
+    o3d.visualization.draw(vis_objects)
+
+
+
+
+
 def generate_tiled_rcboxes(rcbox, grid, output_folder):
     """
     Generates **tiled RCBoxes** by slicing an input mesh along all three axes.
@@ -419,68 +516,71 @@ def generate_tiled_rcboxes(rcbox, grid, output_folder):
 
     listofrcboxpaths= []
     # For visualization using the material
-    material = rendering.MaterialRecord()
-    material.shader = 'defaultUnlit'
-    o3d.visualization.draw([{'name': 'tiledboxes', 'geometry': tilesOfaxis2[0], 'material': material}]) 
+    #material = rendering.MaterialRecord()
+    #material.shader = 'defaultUnlit'
+    vis_meshes = []
 
-    for idx, mesh in enumerate(tilesOfaxis2):
+    for mesh in tilesOfaxis2:
+        color = np.random.rand(3)  # Generate random RGB color
+        mesh.paint_uniform_color(color)  # Assign color
+        vis_meshes.append(mesh)
+
+    # Visualize all meshes
+    #o3d.visualization.draw_geometries(vis_meshes, window_name="Meshes with Different Colors")
+    #o3d.visualization.draw([{'name': 'tiledboxes', 'geometry': tilesOfaxis2[0], 'material': material}]) 
+    testmeshlist = []
+    for idx, mesh in enumerate(vis_meshes):
         i, j, k = idx % grid[0], (idx // grid[0]) % grid[1], (idx // (grid[0] * grid[1])) % grid[2]
 
         tile_name = f"tile_x{str(i).zfill(3)}_y{str(j).zfill(3)}_z{str(k).zfill(3)}"
         output_path = os.path.join(output_folder, tile_name +'.rcbox')
 
         # Prepare new RCBox metadata as a copy of the original
-        tile_rcbox = rcbox_local.copy()
+        tile_rcbox = rcbox
         tile_rcbox['geometry'] = o3d.geometry.TriangleMesh(mesh)
         local_centeroftile = tile_rcbox['geometry'].get_center()
+        print('Localcenter of tile:', local_centeroftile)
         tile_rcbox = transform_to_global(tile_rcbox)
+        print('Globalcenter of tile:', tile_rcbox['geometry'].get_center())
+        testmeshlist.append(mesh)
+        
+
+        # Visualize all meshes
+
+    #vismeshes(testmeshlist)
         #the transformationtolocal values in the tile_rcbox must be updated
         # calculate rotation matrix from Open3D object
-        obb = tile_rcbox['geometry'].get_minimal_oriented_bounding_box()
-        rotationMTile = obb.R
-        tile_rcbox['transform_to_local']['rotation_matrix'] = rotationMTile.T
-        tile_rcbox['transform_to_local']['translation_matrix'] = -1 * tile_rcbox['geometry'].get_center()
+        #obb = tile_rcbox['geometry'].get_minimal_oriented_bounding_box()
+        #obb.color = (1, 0, 0)
+        #frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=obb.center)
+        #frame.translate((1, 0, 0))
+        #o3d.visualization.draw_geometries([obb,frame])
+
+       # testmeshlist.append(obb)
+        #r = Rotation.from_matrix(obb.R)
+        #euler_angles = r.as_euler('zyx', degrees=True)
+        #print('Values of the bounding box:', obb.extent, obb.R, obb.center)
+        #o3d.visualization.draw_geometries(testmeshlist, window_name="OBB Visualization")
+        #make obb a mesh
+        #obb_mesh = o3d.geometry.TriangleMesh.create_box(width=obb.extent[0], height=obb.extent[1], depth=obb.extent[2])
+        #rotationMTile = obb.R
+        #tile_rcbox['transform_to_local']['rotation_matrix'] = rotationMTile.T
+        #tile_rcbox['transform_to_local']['translation_matrix'] = -1 * tile_rcbox['geometry'].get_center()
 
         # Write to file
-        tree = write_rcbox(tile_rcbox)
+        tree = write_rcbox_mobb(tile_rcbox)
         tree.write(output_path)
         #destroy the tile_rcbox
         del tile_rcbox
         
-        listofrcboxpaths.append({"tile_id": tile_name, "rcbox_path": output_path, "processed": False})
+        #listofrcboxpaths.append({"tile_id": tile_name, "rcbox_path": output_path, "processed": False})
     
     return listofrcboxpaths
 
 
 
 
-def RCexport_tiles(listofrcboxpaths, outputfolder, modelname):
-    """Process each tile in RealityCapture using RCCommandBuilder."""
-    builder = RCCommandBuilder()
-    for tile in listofrcboxpaths:
-        #if not tile["processed"]:
-        rcbox_path = tile["rcbox_path"]
-        print(f"Processing tile: {rcbox_path}")
-        obj_path = os.path.join(outputfolder, f"{modelname}_{tile['tile_id']}.obj")
-        
-        builder.add_command("selectModel", modelname)
-        builder.add_command("setReconstructionRegion", rcbox_path)
-        builder.add_command("cutByBox", "outer", "false")
-        
-        builder.add_command("cleanModel")
-        builder.add_command("renameSelectedModel", f"{modelname}_{tile['tile_id']}") 
-        #using the current unwrap settings in the RC instance
-        builder.add_command("unwrap")
-        builder.add_command("reprojectTexture", modelname, f"{modelname}_{tile['tile_id']}")
-        builder.add_command("exportModel", f"{modelname}_{tile['tile_id']}", obj_path, "C:/Users/tronc/Documents/GitHub/RCprocessing/export_param_visualtile.xml")
-        # create subfolder for editsubtile
-        subfolder = os.path.join(outputfolder, f"{modelname}_{tile['tile_id']}_editsubtile")
-        Path(subfolder).mkdir(parents=True, exist_ok=True)
-        # editsubtile obj_path
-        editsubtile_obj_path = os.path.join(subfolder, f"{modelname}_{tile['tile_id']}.obj")
-        builder.add_command("exportModel", f"{modelname}_{tile['tile_id']}", editsubtile_obj_path, "C:/Users/tronc/Documents/GitHub/RCprocessing/export_param_editsubtile.xml")
-        #builder.add_command("save")
-    builder.execute()
+
 
 def main():
 
@@ -488,8 +588,9 @@ def main():
     """Main function to execute the RCBox tiling process."""
     # no user input in dev mode
     modelname, total_triangles, total_textures, min_parts, grid = get_user_input()
-    print('this is all user input:', total_triangles, total_textures, min_parts, grid)
-    #grid = (3, 2, 1)  # Set the tiling grid
+    #print('this is all user input:', total_triangles, total_textures, min_parts, grid)
+    #modelname = 'teststat3'
+    #grid = (2, 1, 1)  # Set the tiling grid
     metafolder = 'E:/WES_L18_Boat/exportTestd/WES_L18_Boat_tiledexport/'
     #create the output folder if not exists
     output_folder = os.path.join(metafolder, modelname)
@@ -503,7 +604,7 @@ def main():
     # Step 2: Read the exported RCBox with open3d
     new_rcbox = read_rcbox(Path(rcbox_path))
     print('this is the translation to local after import:', new_rcbox['transform_to_local']['translation_matrix'])
-    newrcbox_xmltree = write_rcbox(new_rcbox)
+    newrcbox_xmltree = write_rcbox_mobb(new_rcbox)
     newrcbox_xmltree.write(output_folder + '/checkresultofread_new_rcbox.rcbox')
 
     # Step 3: Generate tiled RCBoxes using the clipping pipeline

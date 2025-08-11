@@ -20,8 +20,7 @@ meshdf = UE5lib.parse_mesh_andsubtiles_directory(config['meshfolder'])
 #print number of parts
 print(len(meshdf))
 print(type(meshdf))
-#print list of dicts pretty
-#for part in meshdf:
+#print list of dicts prettyP
 print(meshdf[0])
 #print(meshdf)
 #stop script
@@ -31,8 +30,8 @@ for part in meshdf:
     texturetask = UE5lib.build_import_texture_tasks(part['textures'], config['UEdestination'])
     UE5lib.import_asset(texturetask)
         #print(texturetask[0].imported_object_paths)
-    #if not ue.EditorAssetLibrary.does_asset_exist(config['UEdestination'] + '/' + part['partname']):
-    materialinstance_part = UE5lib.create_constant_material_instance(config['UEbasematerialpath'], config['UEdestination'], part['partname'] + '_maerial', texturetask[0].imported_object_paths[0])
+    if not ue.EditorAssetLibrary.does_asset_exist(config['UEdestination'] + '/' + part['partname']):
+        materialinstance_part = UE5lib.create_constant_material_instance(config['UEbasematerialpath'], config['UEdestination'], part['partname'] + '_maerial', texturetask[0].imported_object_paths[0])
 
     #importedtextureref=
     texture_params = list(materialinstance_part.texture_parameter_values)
