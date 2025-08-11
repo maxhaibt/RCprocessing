@@ -175,8 +175,10 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
             scan['camregistrationpath'] = [Path(file) for file in scan['scan_dir'].rglob("*camregistration.csv")]
             scan['scannerlogfile'] = [file for file in scan['scan_dir'].rglob("00-*")]
             imagelist = []
-            for file in scan['scan_dir'].rglob(imageformat):
-                if not file.stem.endswith('.mask') or not file.stem.startswith('URUK'):
+            #devimg folder path
+            devimgfolderpath = Path(scan['scan_dir']) / '02_TIF'
+            for file in scan['scan_dir'].glob(imageformat):
+                if not (file.stem.endswith('.mask') or file.stem.startswith('URUK') or file.parent.resolve().samefile(devimgfolderpath.resolve())):
                     image_dict = {}
                     image_dict['rawimg_path']= Path(file)
                     mask = image_dict['rawimg_path'].with_name(image_dict['rawimg_path'].name + '.mask.png')
@@ -184,6 +186,7 @@ def provide_scandf(inputdirectory: str, imageformat = '*.dng') ->pd.DataFrame:
                     if mask.is_file():
                         image_dict['maskimg_path'] = mask
                     imagelist.append(image_dict.copy())
+            print('Number of images found: ', len(imagelist))
             scan['imagedf'] = pd.DataFrame(imagelist)
             scandf.append(scan.copy())
     return pd.DataFrame(scandf)

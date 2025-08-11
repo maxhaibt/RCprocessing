@@ -1207,49 +1207,54 @@ def percamfolder_segmentimageseries(imagedf):
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
             }
-
+        print('This is the video_segments: ', video_segments)
         groupsorted = group.sort_values(by='dev-img_path')
         # render the segmentation results every few frames
         vis_frame_stride = 1
+        print('This is the length of the group: ', len(groupsorted))
+    
         
         for out_frame_idx, frameseries in groupsorted.iterrows():
             print('this frame (original) is shown: ', out_frame_idx)
             #plt.figure(figsize=(9, 6))
             #plt.title(f"frame {out_frame_idx}")
             #print('this path is shown: ', frameseries['dev-img_path'])
-            ax.imshow(Image.open(frameseries['dev-img_path']))
+            #ax.imshow(Image.open(frameseries['dev-img_path']))
             if out_frame_idx in video_segments:
             
                 for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-                    show_mask(out_mask, ax, obj_id=out_obj_id)
-                    plt.show(block=False)
-                    rgbmask = binary_mask_to_rgb(out_mask)
-                    # Reshape the mask to the desired shape
-                    mask = rgbmask.squeeze()  # Remove the singleton dimension
-                    rgbmask = mask[:, :, np.newaxis]
-                    #mask = np.flip(mask, axis=0)  # Flip the mask vertically
-                    #mask = mask[:, :, np.newaxis]  # Add a singleton dimension for the channel
+                    print('this object is shown: ', out_obj_id)
+                    print('the mask is of type: ', type(out_mask))
+                    if out_obj_id ==   1:
+                        #show_mask(out_mask, ax, obj_id=out_obj_id)
+                        #plt.show(block=False)
+                        rgbmask = binary_mask_to_rgb(out_mask)
+                        # Reshape the mask to the desired shape
+                        mask = rgbmask.squeeze()  # Remove the singleton dimension
+                        rgbmask = mask[:, :, np.newaxis]
+                        #mask = np.flip(mask, axis=0)  # Flip the mask vertically
+                        #mask = mask[:, :, np.newaxis]  # Add a singleton dimension for the channel
 
-                    # Resize the mask to the original image size
-                    #rgbmask = mask.astype(np.uint8)
+                        # Resize the mask to the original image size
+                        #rgbmask = mask.astype(np.uint8)
 
-                    # Convert the mask to a single-channel image
-                    #out_mask = mask.astype(np.uint8)
+                        # Convert the mask to a single-channel image
+                        #out_mask = mask.astype(np.uint8)
 
-                    # Show the mask
-                    ax.imshow(rgbmask, cmap='gray', alpha=0.6)
-                    plt.show(block=False)
-                    plt.pause(1)
-                    
-                    print('This is the shape of the binary mask: ', out_mask.shape)
-                    print('This is the shape of the mask: ', rgbmask.shape)
-                    mask_path = frameseries['dev-img_path'].with_name(frameseries['dev-img_path'].stem + '.mask.png')
-                    maskimg = cv2.cvtColor(rgbmask.astype(np.uint8), cv2.COLOR_RGB2BGR)
-                    success = cv2.imwrite(str(mask_path), maskimg)
-                    if not success:
-                        print(f"Failed to write image")
-                    else:
-                        print(f"Successfully wrote image")
+                        # Show the mask
+                        ax.imshow(rgbmask, cmap='gray', alpha=0.6)
+                        plt.show(block=False)
+                        plt.pause(1)
+                        
+                        print('This is the shape of the binary mask: ', out_mask.shape)
+                        print('This is the shape of the mask: ', rgbmask.shape)
+                        mask_path = frameseries['dev-img_path'].with_name(frameseries['dev-img_path'].stem + '.mask.png')
+                        maskimg = cv2.cvtColor(rgbmask.astype(np.uint8), cv2.COLOR_RGB2BGR)
+                        success = cv2.imwrite(str(mask_path), maskimg)
+                        if not success:
+                            print(f"Failed to write image")
+                        else:
+                            print(f"Successfully wrote image")
 
 
 
