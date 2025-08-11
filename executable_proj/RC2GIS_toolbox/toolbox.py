@@ -69,7 +69,39 @@ def process_files(file_paths, progress, status, should_continue, root):
                     'height': height
                 })
 
-                # Add code to write reprojected data
+                # Fast path if CRS is identical: just copy with new transform if needed
+                same_crs = (src.crs == dest_crs)
+
+                # make GTiff creation a bit nicer
+                predictor = 3 if src.dtypes[0].startswith("float") else 2
+                kwargs.update({
+                    "driver": "GTiff",
+                    "compress": "deflate",
+                    "tiled": True,
+                    "predictor": predictor,
+                    "bigtiff": "IF_SAFER",
+                })
+
+                with rasterio.open(output_path, "w", **kwargs) as dst:
+                    if same_crs and (src.transform == transform):
+                        # straight copy
+                        dst.write(src.read())
+                    else:
+                        # band-by-band reprojection
+                        for b in range(1, src.count + 1):
+                            reproject(
+                                source=rasterio.band(src, b),
+                                destination=rasterio.band(dst, b),
+                                src_transform=src.transform,
+                                src_crs=src.crs,
+                                dst_transform=transform,
+                                dst_crs=dest_crs,
+                                resampling=Resampling.nearest,  # use BILINEAR/CUBIC for continuous data
+                            )
+
+                status.set(f"Wrote: {output_path.name}")
+                progress["value"] = i + 1
+                progress.update()
 
             except Exception as e:
                 status.set(f"Error processing {file_path}: {e}")
