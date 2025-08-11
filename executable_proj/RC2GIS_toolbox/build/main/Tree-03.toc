@@ -1,0 +1,5 @@
+('c:\\users\\mhaibt\\.conda\\envs\\orthobox_env\\lib\\site-packages\\gdal-3.0.2-py3.9-win-amd64.egg',
+ None,
+ {'EGG-INFO', '*.cp39-win_amd64.pyd', '*.py', '*.pyw', '*.pyd', '*.pyc'},
+ 'DATA',
+ [])

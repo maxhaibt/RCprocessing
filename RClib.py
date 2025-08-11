@@ -6,7 +6,6 @@ import os
 import json
 import itertools
 import pandas as pd
-import exifread
 import pathconfig
 from datetime import datetime
 import geopandas as gpd
@@ -15,8 +14,8 @@ from shapely.affinity import rotate
 import xml.etree.ElementTree as ET
 import re
 import math
-import matplotlib.pyplot as plt
-from scipy.spatial.transform import Rotation as R
+#import matplotlib.pyplot as plt
+#from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 #from geopandas.tools import sjoin
 #from shapely.geometry import Polygon
@@ -108,7 +107,7 @@ def loadconfigs(configpath):
     with open(configpath) as configfile:
         config = json.load(configfile)
     return config
-config = loadconfigs('E:/GitHub/RCprocessing/config_scanner.json')
+#config = loadconfigs('E:/GitHub/RCprocessing/config_scanner.json')
 
 
 def sort_image_series(folderpath, timedelta=60):
@@ -225,71 +224,151 @@ def create_object_coordinate_frame(x, y, z, x_length, y_length, z_length):
     return coord_frame
 
 
+def check_dtype(name, array):
+    """
+    Checks and prints the dtype of a given NumPy array.
+    Alerts if there's an unintended conversion between float32 and float64.
+    """
+    dtype = array.dtype
+    print(f"[CHECK] {name} dtype: {dtype}")
+    if dtype == np.float32:
+        print(f"[WARNING] {name} is float32! Potential precision loss.")
+    elif dtype == np.float64:
+        print(f"[INFO] {name} is float64.")
 
+def transform_to_local(rcbox):
+    check_dtype("Rotation Matrix before local transform", rcbox['transform_to_local']['rotation_matrix'])
+    check_dtype("Translation Matrix before local transform", rcbox['transform_to_local']['translation_matrix'])
 
-def tranformmatrix_to_local(rcbox):
-    # Extract the transformations
-    translation = rcbox['transform_to_local']['translation_matrix']
-    rotation = rcbox['transform_to_local']['rotation_matrix']
+    rcbox['geometry'].rotate(rcbox['transform_to_local']['rotation_matrix'], center=rcbox['geometry'].get_center())
+    rcbox['geometry'].translate(rcbox['transform_to_local']['translation_matrix'], relative=True)
 
-    print(rotation)
+    check_dtype("Geometry after local transform", np.array(rcbox['geometry'].get_center()))
+    return rcbox
 
-    # Create a 4x4 identity matrix
-    to_local_matrix = np.eye(4)
+def transform_to_global(rcbox):
+    rcbox['geometry'].translate(-rcbox['transform_to_local']['translation_matrix'], relative=True)
+    rcbox['geometry'].rotate(rcbox['transform_to_local']['rotation_matrix'].T, center=rcbox['geometry'].get_center())
 
-    # Set the rotation
-    to_local_matrix[:3, :3] = rotation  # Transpose of the rotation matrix
-
-    # Set the translation (inverse)
-    to_local_matrix[:3, 3] = translation
-
-    return to_local_matrix
-
-def transformmatrix_to_global(rcbox):
-    # Extract the transformations
-    translation = rcbox['transform_to_local']['translation_matrix']
-    rotation = rcbox['transform_to_local']['rotation_matrix']
-
-    # Create a 4x4 identity matrix
-    to_global_matrix = np.eye(4)
-
-    # Set the rotation
-    to_global_matrix[:3, :3] = rotation.T
-
-    # Set the translation
-    to_global_matrix[:3, 3] = -translation
-
-    return to_global_matrix
+    check_dtype("Geometry after global transform", np.array(rcbox['geometry'].get_center()))
+    return rcbox
 
 def persistent_translate(rcbox, x, y, z):
-    #create translation matrix
-    translation_matrix = np.array([x, y, z])
+    translation_matrix = np.array([x, y, z], dtype=np.float64)
+    check_dtype("Translation matrix", translation_matrix)
+
     rcbox['geometry'].translate(translation_matrix, relative=True)
-    #document inverted translation_matrix
-    rcbox['transform_to_local']['translation_matrix'] = rcbox['transform_to_local']['translation_matrix'] -translation_matrix
+    rcbox['transform_to_local']['translation_matrix'] = rcbox['transform_to_local']['translation_matrix'] - translation_matrix
+
+    check_dtype("Updated Translation Matrix", rcbox['transform_to_local']['translation_matrix'])
     return rcbox
 
 def localspace_rotation(rcbox, yaw, pitch, roll):
-    # transform the rcbox to the local space
-    to_local_matrix = tranformmatrix_to_local(rcbox)
-    localgeom = rcbox['geometry'].transform(to_local_matrix)
-    # convert to radians
     yaw_rad = math.radians(yaw)
     pitch_rad = math.radians(pitch)
     roll_rad = math.radians(roll)
-    # Create a rotation matrix
+
     R = o3d.geometry.Geometry3D.get_rotation_matrix_from_yxz([yaw_rad, pitch_rad, roll_rad])
-    # Apply the rotation
-    print('Back to local center should be 000:',localgeom.get_center())
-    locallymodified = localgeom.rotate(R, center=[0,0,0])
-    # transform the locally modified geometry of the rcbox to the global space
-    to_global_matrix = transformmatrix_to_global(rcbox)
-    print('back matrix is: ', to_global_matrix)
-    # Apply the global transformation to the locally modified geometry
-    rcbox['geometry'] = locallymodified.transform(to_global_matrix)
-    #rcbox['geometry'] = locallymodified
+    check_dtype("Rotation Matrix R", np.array(R))
+
+    center = rcbox['geometry'].get_center()
+    print('this is the center where the rotation is applied:', center)
+
+    rcbox['geometry'].rotate(R, center=center)
     rcbox['transform_to_local']['rotation_matrix'] = rcbox['transform_to_local']['rotation_matrix'] @ R.T
+
+    check_dtype("Updated Rotation Matrix", rcbox['transform_to_local']['rotation_matrix'])
     return rcbox
+
+def read_rcbox(rcbox_path):
+    if rcbox_path.is_file():
+        tree = ET.parse(rcbox_path)
+        root = tree.getroot()
+        print(root.text)
+
+        depth_RC, width_RC, height_RC = [float(val) for val in root.find('widthHeightDepth').text.split()]
+        x, y, z = [float(val) for val in root.find('CentreEuclid/centre').text.split()]
+        yaw, pitch, roll = [float(val) for val in root.find('yawPitchRoll').text.split()]
+
+        global_coord_system = root.get('globalCoordinateSystem')
+        global_coord_system_name = root.get('globalCoordinateSystemName')
+
+        cube_legacy = o3d.geometry.TriangleMesh.create_box(width=depth_RC, height=width_RC, depth=height_RC)
+        cube_legacy = cube_legacy.translate(-cube_legacy.get_center())
+
+        cube_tensor = o3d.t.geometry.TriangleMesh.from_legacy(cube_legacy)
+        rcbox = {
+            'name': rcbox_path.stem,
+            'geometry': cube_tensor,
+            'transform_to_local': {
+                'translation_matrix': np.array([0, 0, 0], dtype=np.float64),
+                'rotation_matrix': np.identity(3, dtype=np.float64),
+                'scale_matrix': np.array([
+                    [1, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1]
+                ], dtype=np.float64)
+            },
+            'globalCoordinateSystem': '',
+            'globalCoordinateSystemName': ''
+        }
+
+        print('initial translate to global', x, y, z)
+        rcbox = persistent_translate(rcbox, x, y, z)
+        rcbox = localspace_rotation(rcbox, yaw, pitch, roll)
+        rcbox['globalCoordinateSystem'] = global_coord_system
+        rcbox['globalCoordinateSystemName'] = global_coord_system_name
+
+    else:
+        raise FileNotFoundError(f"File not found: {rcbox_path}")
+    return rcbox
+
+def rotation_matrix_to_euler_angles(R):
+    yaw = math.atan2(R[1, 0], R[0, 0])
+    pitch = math.atan2(-R[2, 0], math.sqrt(R[2, 1]**2 + R[2, 2]**2))
+    roll = math.atan2(R[2, 1], R[2, 2])
+    return [yaw, pitch, roll]
+
+def write_rcbox(rcbox):
+    x, y, z = rcbox['geometry'].to_legacy().get_center()
+
+    rcbox_local = transform_to_local(rcbox)
+    print('This should be 0,0,0:', rcbox_local['geometry'].get_center())
+
+    bounds = rcbox_local['geometry'].get_axis_aligned_bounding_box().to_legacy().get_extent()
+    depth, width, height = np.array(bounds, dtype=np.float64)
+    check_dtype("Bounding Box Dimensions", np.array([depth, width, height]))
+
+    rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
+    yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
+    yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
+
+    root = ET.Element('ReconstructionRegion', {
+        'globalCoordinateSystem': rcbox['globalCoordinateSystem'],
+        'globalCoordinateSystemWkt': "",
+        'globalCoordinateSystemName': rcbox['globalCoordinateSystemName'],
+        'isGeoreferenced': "1",
+        'isLatLon': "0"
+    })
+
+    ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
+    ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
+    ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
+
+    centre_euclid = ET.SubElement(root, "CentreEuclid")
+    print('writing center:', x, y, z)
+    ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
+
+    ET.SubElement(root, "Residual", {
+        'R': "1 0 0 0 1 0 0 0 1",
+        't': "0 0 0",
+        's': "1",
+        'ownerId': "{2B36705F-74C9-4270-BED3-074F279D427B}"
+    })
+
+    tree = ET.ElementTree(root)
+    return tree
 
 
 def localspace_scale(rcbox, scale_x, scale_y, scale_z, save=True):
@@ -320,106 +399,6 @@ def localspace_scale(rcbox, scale_x, scale_y, scale_z, save=True):
         rcbox['transform_to_local']['scale_matrix'] = rcbox['transform_to_local']['scale_matrix'] @ S
 
     return rcbox
-
-def read_rcbox(rcbox_path):
-    if rcbox_path.is_file():
-        # Parse the XML file
-        tree = ET.parse(rcbox_path)
-        root = tree.getroot()
-        print(root.text)
-        # Extract the necessary information from the XML
-        depth_RC, width_RC, height_RC = [float(val) for val in root.find('widthHeightDepth').text.split()]
-        x, y, z = [float(val) for val in root.find('CentreEuclid/centre').text.split()]
-        yaw, pitch, roll = [float(val) for val in root.find('yawPitchRoll').text.split()]
-
-        global_coord_system = root.get('globalCoordinateSystem')
-        global_coord_system_name = root.get('globalCoordinateSystemName')
-
-        # Create a cube (box)
-        #WARNING open3D width,height,depth are switched compared to reality capture
-        #width in open3d is x-directional length is depth in RC
-        #height in open3d is y-directional length is width in RC
-        #depth in open3d is  z-directional length is height in RC
-        cube = o3d.geometry.TriangleMesh.create_box(width=depth_RC, height=width_RC, depth=height_RC)
-        cube = cube.translate([0,0,0], relative=False)
-        rcbox = {
-            'name': rcbox_path.stem,
-            'geometry': cube,
-            'transform_to_local': {'translation_matrix': np.array([0, 0, 0]),
-                                   'rotation_matrix': np.identity(3),
-                                   'scale_matrix': np.array([
-                                        [1, 0, 0, 0],
-                                        [0, 1, 0, 0],
-                                        [0, 0, 1, 0],
-                                        [0, 0, 0, 1]]),
-            'globalCoordinateSystem': '',
-            'globalCoordinateSystemName': ''
-        }}
-
-        # apply the global transformations from the rcbox file
-        rcbox = persistent_translate(rcbox, x, y, z)
-        rcbox = localspace_rotation(rcbox, yaw, pitch, roll)
-        rcbox['globalCoordinateSystem'] = global_coord_system
-        rcbox['globalCoordinateSystemName'] = global_coord_system_name
-        print(rcbox)
-
-    return rcbox
-
-
-
-def rotation_matrix_to_euler_angles(R):
-    yaw = math.atan2(R[1, 0], R[0, 0])
-    pitch = math.atan2(-R[2, 0], math.sqrt(R[2, 1]**2 + R[2, 2]**2))
-    roll = math.atan2(R[2, 1], R[2, 2])
-
-    return [yaw, pitch, roll]
-
-def write_rcbox(rcbox):
-    # Extract the dimensions from the geometry
-    bounds = rcbox['geometry'].get_axis_aligned_bounding_box().get_extent()
-    depth, width, height = bounds
-
-    # Extract the rotation matrix and convert it to Euler angles
-    rotation_matrix = rcbox['transform_to_local']['rotation_matrix']
-    yaw_rad, pitch_rad, roll_rad = rotation_matrix_to_euler_angles(rotation_matrix)
-
-    # Convert the Euler angles to degrees
-    yaw, pitch, roll = [math.degrees(angle) for angle in [yaw_rad, pitch_rad, roll_rad]]
-
-    # Create the XML root element with its attributes
-    root = ET.Element('ReconstructionRegion', {
-        'globalCoordinateSystem': rcbox['globalCoordinateSystem'],
-        'globalCoordinateSystemWkt': "",
-        'globalCoordinateSystemName': rcbox['globalCoordinateSystemName'],
-        'isGeoreferenced': "1",
-        'isLatLon': "0"
-    })
-
-    # Add the yawPitchRoll element
-    ET.SubElement(root, "yawPitchRoll").text = f"{yaw} {pitch} {roll}"
-
-    # Add the widthHeightDepth element
-    ET.SubElement(root, "widthHeightDepth").text = f"{depth} {width} {height}"
-
-    # Add the Header element (keeping it same as the provided XML)
-    ET.SubElement(root, "Header", {'magic': "5395016", 'version': "2"})
-
-    # Add the CentreEuclid element
-    centre_euclid = ET.SubElement(root, "CentreEuclid")
-    x, y, z = rcbox['geometry'].get_center()
-    ET.SubElement(centre_euclid, "centre").text = f"{x} {y} {z}"
-
-    # Add the Residual element (keeping it same as the provided XML)
-    ET.SubElement(root, "Residual", {
-        'R': "1 0 0 0 1 0 0 0 1",
-        't': "0 0 0",
-        's': "1",
-        'ownerId': "{2B36705F-74C9-4270-BED3-074F279D427B}"
-    })
-
-    # Serialize the XML tree to a file
-    tree = ET.ElementTree(root)
-    return tree
 
 def generate_rcortho(rcbox, width, height, colorType, modelName, boxSideCornerIndices):
     # Generate the root XML element for the rcortho file
@@ -534,6 +513,7 @@ def generate_point_cloud_with_cameras(scan_df):
 def get_frontal_cameras(scan):
     # Step 1: Scale the rcbox by 30 along the local y-axis
     modified_rcbox = localspace_scale(scan['rcbox'], 1, 30, 1,save=False)
+    print('Thisbox',modified_rcbox)
 
     # Step 2: Create an oriented bounding box around the modified rcbox
     obb = modified_rcbox['geometry'].get_oriented_bounding_box()
@@ -543,6 +523,7 @@ def get_frontal_cameras(scan):
 
     # Step 4: Get the indices of cameras inside the bounding box
     indices = obb.get_point_indices_within_bounding_box(pcd_cameras.points)
+    print(indices)
 
     # Step 5: Filter out the points (cameras) in scan['imagedf'] that are not inside the bounding box
     scan['imagedf'] = scan['imagedf'].iloc[indices]

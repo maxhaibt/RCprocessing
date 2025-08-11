@@ -1,41 +1,37 @@
 
-#import pyproj
-#pyproj.datadir.set_data_dir('C:/Users/mhaibt/Anaconda3/envs/orthobox_env/Library/share/proj/')
+# stdlib
+from pathlib import Path
+import threading
+import xml.etree.ElementTree as ET
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+# scientific/geo
 import numpy as np
 import geopandas as gpd
-from pathlib import Path
-from shapely.geometry import box, Polygon
+from shapely.geometry import box, Polygon, LineString
 from shapely.affinity import rotate
-import xml.etree.ElementTree as ET
-#from osgeo import gdal, gdal_array
-import gdal
-from shapely.geometry import LineString
-from tkinter import filedialog, messagebox
+
+# rasterio (public APIs only)
 import rasterio
-import rasterio._shim
-import rasterio._base
-import rasterio.rpc
-import rasterio.control
-import rasterio.crs
-import rasterio.sample
-import rasterio.vrt
-import rasterio._features
-from rasterio.warp import calculate_default_transform, reproject, Resampling
-from affine import Affine
-import threading
-import tkinter as tk
-from tkinter import ttk
-from rasterio.transform import from_origin
 from rasterio.env import Env
+from rasterio.transform import from_origin
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 
-
-
-
-
-
+from affine import Affine
+from pyproj import CRS
+from osgeo import gdal
 
 def process_files(file_paths, progress, status, should_continue, root):
     epsg_code = ask_for_epsg(root)
+    
+    try:
+        # Convert EPSG code to CRS object (integer form of EPSG)
+        dest_crs = CRS.from_epsg(int(epsg_code))
+    except ValueError:
+        status.set(f"Invalid EPSG code: {epsg_code}")
+        return
+
     num_files = len(file_paths)
     progress["maximum"] = num_files
 
@@ -44,58 +40,41 @@ def process_files(file_paths, progress, status, should_continue, root):
             status.set("Aborted")
             break
 
-        # Update the status
         status.set(f"Processing file {i+1} of {num_files}")
 
         output_path = Path(file_path).with_stem(Path(file_path).stem + '_warp').with_suffix('.tif')
-
         output_gpkg_path = Path(file_path).with_suffix('.gpkg')
 
-        # Reproject and warp
         with rasterio.open(file_path) as src:
-            transform, width, height = calculate_default_transform(src.crs, epsg_code, src.width, src.height, *src.bounds)
-            kwargs = src.meta.copy()
-            kwargs.update({
-                'crs': epsg_code,
-                'transform': transform,
-                'width': width,
-                'height': height
-            })
-            with rasterio.open(output_path, 'w', **kwargs) as dst:
-                for j in range(1, src.count + 1):
-                    reproject(
-                        source=rasterio.band(src, j),
-                        destination=rasterio.band(dst, j),  # Changed i to j
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=transform,
-                        dst_crs=epsg_code)
+            if src.crs is None:
+                status.set(f"CRS not found in source file: {file_path}")
+                continue
+            
+            try:
+                # Convert source CRS to an EPSG code if possible
+                source_crs = CRS.from_string(src.crs.to_wkt())
+                print(f"Source CRS EPSG Code: {source_crs.to_epsg()}")
 
-        with Env(GDAL_PAM_ENABLED='YES'):
-            # Translate to GeoPackage
-            gdal.Translate(str(output_gpkg_path), str(output_path), format='GPKG', creationOptions=['TILE_FORMAT=PNG', 'NODATA_VALUE=0'])
+                # Perform the reprojection
+                print('CRS of the source file:', src.crs)
+                print('Destination CRS:', dest_crs)
 
-            # Open the dataset
-            ds = gdal.Open(str(output_gpkg_path), gdal.GA_Update)
+                transform, width, height = calculate_default_transform(src.crs, dest_crs, src.width, src.height, *src.bounds)
 
-            # Create a new transparency band where we set the black and near black pixels as transparent
-            for i in range(1, ds.RasterCount + 1):
-                band = ds.GetRasterBand(i)
-                band_array = band.ReadAsArray()
-                band_array[band_array < 10] = 0
-                band.SetNoDataValue(0)  # Set NoData value to 0
-                band.WriteArray(band_array)
+                kwargs = src.meta.copy()
+                kwargs.update({
+                    'crs': dest_crs,
+                    'transform': transform,
+                    'width': width,
+                    'height': height
+                })
 
-            # Generate overviews
-            gdal.SetConfigOption('COMPRESS_OVERVIEW', 'JPEG')
-            ds.BuildOverviews('NEAREST', [2, 4, 8, 16, 32, 64, 128])
+                # Add code to write reprojected data
 
-        # Update the progress bar
-        progress["value"] = i + 1
+            except Exception as e:
+                status.set(f"Error processing {file_path}: {e}")
+                continue
 
-    if should_continue.get():
-        status.set("Operation completed successfully!")
-        messagebox.showinfo("Info", "Operation completed successfully!")
 
 def ask_for_epsg(root):
     def on_submit():
