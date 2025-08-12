@@ -22,14 +22,32 @@ from affine import Affine
 from pyproj import CRS
 from osgeo import gdal
 
+def ui_set(root, tkvar, value):
+    root.after(0, lambda: tkvar.set(value))
+
+def fmt_affine(A):
+    # pretty-print a rasterio Affine as a 3x3
+    return (f"| {A.a: .8f}, {A.b: .8f}, {A.c: .8f}|\n"
+            f"| {A.d: .8f}, {A.e: .8f}, {A.f: .8f}|\n"
+            f"|  0.00000000,  0.00000000,  1.00000000|")
+
+def log_transform_diff(src_A, dst_A):
+    diffs = []
+    if not np.isclose(src_A.a, dst_A.a):    diffs.append(f"a (pixel width): {src_A.a} -> {dst_A.a}")
+    if not np.isclose(src_A.e, dst_A.e):    diffs.append(f"e (pixel height): {src_A.e} -> {dst_A.e}")
+    if not np.isclose(src_A.b, dst_A.b):    diffs.append(f"b (x-rotation/skew): {src_A.b} -> {dst_A.b}")
+    if not np.isclose(src_A.d, dst_A.d):    diffs.append(f"d (y-rotation/skew): {src_A.d} -> {dst_A.d}")
+    if not np.isclose(src_A.c, dst_A.c):    diffs.append(f"c (x origin): {src_A.c} -> {dst_A.c}")
+    if not np.isclose(src_A.f, dst_A.f):    diffs.append(f"f (y origin): {src_A.f} -> {dst_A.f}")
+    return diffs
+
 def process_files(file_paths, progress, status, should_continue, root):
     epsg_code = ask_for_epsg(root)
-    
+
     try:
-        # Convert EPSG code to CRS object (integer form of EPSG)
         dest_crs = CRS.from_epsg(int(epsg_code))
     except ValueError:
-        status.set(f"Invalid EPSG code: {epsg_code}")
+        ui_set(root, status, f"Invalid EPSG code: {epsg_code}")
         return
 
     num_files = len(file_paths)
@@ -37,75 +55,116 @@ def process_files(file_paths, progress, status, should_continue, root):
 
     for i, file_path in enumerate(file_paths):
         if not should_continue.get():
-            status.set("Aborted")
+            ui_set(root, status, "Aborted")
             break
 
-        status.set(f"Processing file {i+1} of {num_files}")
+        p = Path(file_path)
+        ui_set(root, status, f"Processing {i+1}/{num_files}: {p.name}")
+        print(f"\n[{i+1}/{num_files}] {p}")
 
-        output_path = Path(file_path).with_stem(Path(file_path).stem + '_warp').with_suffix('.tif')
-        output_gpkg_path = Path(file_path).with_suffix('.gpkg')
+        output_path = p.with_stem(p.stem + "_warp").with_suffix(".tif")
 
         with rasterio.open(file_path) as src:
             if src.crs is None:
-                status.set(f"CRS not found in source file: {file_path}")
+                ui_set(root, status, f"CRS not found: {p.name}")
+                print("✖ CRS missing; skipping.")
                 continue
-            
+
             try:
-                # Convert source CRS to an EPSG code if possible
                 source_crs = CRS.from_string(src.crs.to_wkt())
-                print(f"Source CRS EPSG Code: {source_crs.to_epsg()}")
+                print(f"Source CRS EPSG: {source_crs.to_epsg()} | Dest CRS EPSG: {dest_crs.to_epsg()}")
+            except Exception:
+                print("Note: could not derive EPSG from source; will use full CRS.")
+            
+            # Proposed north-up grid
+            transform_new, width_new, height_new = calculate_default_transform(
+                src.crs, dest_crs, src.width, src.height, *src.bounds
+            )
 
-                # Perform the reprojection
-                print('CRS of the source file:', src.crs)
-                print('Destination CRS:', dest_crs)
+            print("-> Src transform:\n" + fmt_affine(src.transform))
+            print("-> Proposed (north-up) transform:\n" + fmt_affine(transform_new))
+            print(f"-> Proposed size: {width_new} x {height_new}")
 
-                transform, width, height = calculate_default_transform(src.crs, dest_crs, src.width, src.height, *src.bounds)
+            # Decide whether to warp: warp if grid differs OR CRS differs
+            same_epsg = False
+            try:
+                same_epsg = (src.crs is not None) and (src.crs.to_epsg() == dest_crs.to_epsg())
+            except Exception:
+                same_epsg = False
 
-                kwargs = src.meta.copy()
+            # grid equality test (tolerant)
+            grids_equal = np.allclose(
+                np.array(src.transform.to_gdal()),
+                np.array(transform_new.to_gdal()),
+                atol=1e-9
+            )
+
+            need_warp = (not same_epsg) or (not grids_equal)
+            if not same_epsg:
+                print("-> CRS differs -> will reproject.")
+            elif not grids_equal:
+                print("-> CRS equal but grid differs (rotation/scale/origin) -> will warp to north-up.")
+                for d in log_transform_diff(src.transform, transform_new):
+                    print("   Δ " + d)
+            else:
+                print("-> CRS and grid identical -> copy only (no warp).")
+
+            # Build output metadata
+            kwargs = src.meta.copy()
+            kwargs.update({
+                "driver": "GTiff",
+                "compress": "deflate",
+                "tiled": True,
+                "predictor": 3 if src.dtypes[0].startswith("float") else 2,
+                "bigtiff": "IF_SAFER",
+            })
+            if src.nodata is not None:
+                kwargs["nodata"] = src.nodata
+
+            if need_warp:
                 kwargs.update({
-                    'crs': dest_crs,
-                    'transform': transform,
-                    'width': width,
-                    'height': height
+                    "crs": dest_crs,
+                    "transform": transform_new,
+                    "width": width_new,
+                    "height": height_new,
+                })
+            else:
+                kwargs.update({
+                    "crs": src.crs,
+                    "transform": src.transform,
+                    "width": src.width,
+                    "height": src.height,
                 })
 
-                # Fast path if CRS is identical: just copy with new transform if needed
-                same_crs = (src.crs == dest_crs)
+            # Choose resampling automatically (nearest for integer types)
+            first_dtype = np.dtype(src.dtypes[0])
+            is_integer = np.issubdtype(first_dtype, np.integer)
+            resamp = Resampling.nearest if is_integer else Resampling.bilinear
+            print(f"-> Resampling: {'NEAREST' if is_integer else 'BILINEAR'} (dtype={first_dtype})")
 
-                # make GTiff creation a bit nicer
-                predictor = 3 if src.dtypes[0].startswith("float") else 2
-                kwargs.update({
-                    "driver": "GTiff",
-                    "compress": "deflate",
-                    "tiled": True,
-                    "predictor": predictor,
-                    "bigtiff": "IF_SAFER",
-                })
+            with rasterio.open(output_path, "w", **kwargs) as dst:
+                if need_warp:
+                    print("-> Reprojecting bands…")
+                    for b in range(1, src.count + 1):
+                        print(f"   - Band {b}/{src.count}")
+                        reproject(
+                            source=rasterio.band(src, b),
+                            destination=rasterio.band(dst, b),
+                            src_transform=src.transform,
+                            src_crs=src.crs,
+                            dst_transform=transform_new,
+                            dst_crs=dest_crs,
+                            resampling=resamp,
+                        )
+                else:
+                    print("-> Copying pixels (no resampling).")
+                    dst.write(src.read())
 
-                with rasterio.open(output_path, "w", **kwargs) as dst:
-                    if same_crs and (src.transform == transform):
-                        # straight copy
-                        dst.write(src.read())
-                    else:
-                        # band-by-band reprojection
-                        for b in range(1, src.count + 1):
-                            reproject(
-                                source=rasterio.band(src, b),
-                                destination=rasterio.band(dst, b),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=transform,
-                                dst_crs=dest_crs,
-                                resampling=Resampling.nearest,  # use BILINEAR/CUBIC for continuous data
-                            )
+            print(f"✔ Wrote {output_path}")
+            ui_set(root, status, f"Wrote: {output_path.name}")
+            progress["value"] = i + 1
+            progress.update()
 
-                status.set(f"Wrote: {output_path.name}")
-                progress["value"] = i + 1
-                progress.update()
-
-            except Exception as e:
-                status.set(f"Error processing {file_path}: {e}")
-                continue
 
 
 def ask_for_epsg(root):
@@ -160,7 +219,7 @@ def profilemappping_to_gpkg(raster_files, output_gpkg, root):
     gdf_lines.to_file(output_gpkg, layer='upper_lines', driver='GPKG') 
 
     # Save orthoboxes layer
-    gdf_orthobox = read_rcorthobox([{'orthoboxfile': Path(file_path).with_suffix('.rcortho')} for file_path in raster_files])
+    gdf_orthobox = read_rcorthobox([{'orthoboxfile': Path(file_path).with_suffix('.rsortho')} for file_path in raster_files])
     gdf_orthobox.to_file(output_gpkg, layer='orthoboxes', driver='GPKG')
      
 
@@ -280,7 +339,7 @@ def abort_processing(should_continue, status):
 
 
 def open_file_browser_Orthobox2GIS():
-    file_paths = filedialog.askopenfilenames(title="Select orthobox files", filetypes=(("Orthobox files", "*.rcortho"), ("All files", "*.*")))
+    file_paths = filedialog.askopenfilenames(title="Select orthobox files", filetypes=(("Orthobox files", "*.rsortho"), ("All files", "*.*")))
 
     # Read and process the orthobox files
     if file_paths:
