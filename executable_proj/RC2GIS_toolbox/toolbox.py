@@ -22,14 +22,63 @@ from affine import Affine
 from pyproj import CRS
 from osgeo import gdal
 
-def process_files(file_paths, progress, status, should_continue, root):
-    epsg_code = ask_for_epsg(root)
-    
+def ui_set(root, tkvar, value):
+    root.after(0, lambda: tkvar.set(value))
+
+def fmt_affine(A):
+    return (f"| {A.a: .8f}, {A.b: .8f}, {A.c: .8f}|\n"
+            f"| {A.d: .8f}, {A.e: .8f}, {A.f: .8f}|\n"
+            f"|  0.00000000,  0.00000000,  1.00000000|")
+
+def log_transform_diff(src_A, dst_A):
+    diffs = []
+    import numpy as _np
+    if not _np.isclose(src_A.a, dst_A.a): diffs.append(f"a (px width): {src_A.a} -> {dst_A.a}")
+    if not _np.isclose(src_A.e, dst_A.e): diffs.append(f"e (px height): {src_A.e} -> {dst_A.e}")
+    if not _np.isclose(src_A.b, dst_A.b): diffs.append(f"b (x-skew): {src_A.b} -> {dst_A.b}")
+    if not _np.isclose(src_A.d, dst_A.d): diffs.append(f"d (y-skew): {src_A.d} -> {dst_A.d}")
+    if not _np.isclose(src_A.c, dst_A.c): diffs.append(f"c (x origin): {src_A.c} -> {dst_A.c}")
+    if not _np.isclose(src_A.f, dst_A.f): diffs.append(f"f (y origin): {src_A.f} -> {dst_A.f}")
+    return diffs
+
+def export_raster_gpkg(src_tif_path, gpkg_path, *, nodata=None,
+                       tile_format="PNG", blocksize=512,
+                       overview_levels=(2,4,8,16,32,64),
+                       overview_resampling="AVERAGE",
+                       overview_compress="DEFLATE",
+                       quality=90, zlevel=6):
+    """
+    Convert a (multi-band) GeoTIFF to a raster GeoPackage with tiles + pyramids.
+    - PNG (lossless) or JPEG tiles
+    - Overviews built in-place
+    """
+    co = [
+        f"TILE_FORMAT={tile_format}",
+        f"BLOCKSIZE={blocksize}",
+        f"QUALITY={quality}",  # for JPEG; ignored by PNG
+        f"ZLEVEL={zlevel}",    # for PNG; ignored by JPEG
+    ]
+    if nodata is not None:
+        co.append(f"NODATA_VALUE={nodata}")
+
+    gdal.Translate(str(gpkg_path), str(src_tif_path), format="GPKG", creationOptions=co)
+
+    gdal.SetConfigOption("COMPRESS_OVERVIEW", overview_compress)
+    ds = gdal.Open(str(gpkg_path), gdal.GA_Update)
     try:
-        # Convert EPSG code to CRS object (integer form of EPSG)
+        ds.BuildOverviews(overview_resampling, list(overview_levels))
+    finally:
+        ds = None
+
+
+def _process_topdown_common(file_paths, progress, status, should_continue, root, *,
+                            resampling_for_warp, gpkg_tile_format, gpkg_ovr_compress):
+    """Internal: warp to north-up + write GeoTIFF + raster GPKG with pyramids."""
+    epsg_code = ask_for_epsg(root)
+    try:
         dest_crs = CRS.from_epsg(int(epsg_code))
     except ValueError:
-        status.set(f"Invalid EPSG code: {epsg_code}")
+        ui_set(root, status, f"Invalid EPSG code: {epsg_code}")
         return
 
     num_files = len(file_paths)
@@ -37,75 +86,149 @@ def process_files(file_paths, progress, status, should_continue, root):
 
     for i, file_path in enumerate(file_paths):
         if not should_continue.get():
-            status.set("Aborted")
+            ui_set(root, status, "Aborted")
             break
 
-        status.set(f"Processing file {i+1} of {num_files}")
+        p = Path(file_path)
+        ui_set(root, status, f"Processing {i+1}/{num_files}: {p.name}")
+        print(f"\n[{i+1}/{num_files}] {p}")
 
-        output_path = Path(file_path).with_stem(Path(file_path).stem + '_warp').with_suffix('.tif')
-        output_gpkg_path = Path(file_path).with_suffix('.gpkg')
+        output_path = p.with_stem(p.stem + "_warp").with_suffix(".tif")
 
         with rasterio.open(file_path) as src:
             if src.crs is None:
-                status.set(f"CRS not found in source file: {file_path}")
+                ui_set(root, status, f"CRS not found: {p.name}")
+                print("✖ CRS missing; skipping.")
                 continue
-            
+
+            # Proposed north-up transform/size
+            transform_new, width_new, height_new = calculate_default_transform(
+                src.crs, dest_crs, src.width, src.height, *src.bounds
+            )
+
+            print(f"Source CRS: {src.crs}  →  Dest CRS: {dest_crs}")
+            print("-> Src transform:\n" + fmt_affine(src.transform))
+            print("-> Proposed transform (north-up):\n" + fmt_affine(transform_new))
+            print(f"-> Proposed size: {width_new} x {height_new}")
+
+            # Decide: warp if CRS or grid differs
+            same_epsg = False
             try:
-                # Convert source CRS to an EPSG code if possible
-                source_crs = CRS.from_string(src.crs.to_wkt())
-                print(f"Source CRS EPSG Code: {source_crs.to_epsg()}")
+                same_epsg = (src.crs is not None) and (src.crs.to_epsg() == dest_crs.to_epsg())
+            except Exception:
+                same_epsg = False
 
-                # Perform the reprojection
-                print('CRS of the source file:', src.crs)
-                print('Destination CRS:', dest_crs)
+            grids_equal = np.allclose(
+                np.array(src.transform.to_gdal()),
+                np.array(transform_new.to_gdal()),
+                atol=1e-9
+            )
+            need_warp = (not same_epsg) or (not grids_equal)
 
-                transform, width, height = calculate_default_transform(src.crs, dest_crs, src.width, src.height, *src.bounds)
+            if not same_epsg:
+                print("-> CRS differs -> will reproject.")
+            elif not grids_equal:
+                print("-> CRS equal but grid differs -> will warp to north-up.")
+                for d in log_transform_diff(src.transform, transform_new):
+                    print("   Δ " + d)
+            else:
+                print("-> CRS and grid identical -> copy only (no warp).")
 
-                kwargs = src.meta.copy()
+            # Build output meta with sane GTiff defaults
+            kwargs = src.meta.copy()
+            predictor = 3 if src.dtypes[0].startswith("float") else 2
+            kwargs.update({
+                "driver": "GTiff",
+                "compress": "deflate",
+                "tiled": True,
+                "predictor": predictor,
+                "bigtiff": "IF_SAFER",
+            })
+            if src.nodata is not None:
+                kwargs["nodata"] = src.nodata
+
+            if need_warp:
                 kwargs.update({
-                    'crs': dest_crs,
-                    'transform': transform,
-                    'width': width,
-                    'height': height
+                    "crs": dest_crs,
+                    "transform": transform_new,
+                    "width": width_new,
+                    "height": height_new,
+                })
+            else:
+                kwargs.update({
+                    "crs": src.crs,
+                    "transform": src.transform,
+                    "width": src.width,
+                    "height": src.height,
                 })
 
-                # Fast path if CRS is identical: just copy with new transform if needed
-                same_crs = (src.crs == dest_crs)
+            # Do the write
+            with rasterio.open(output_path, "w", **kwargs) as dst:
+                if need_warp:
+                    print(f"-> Reprojecting with {resampling_for_warp.name}…")
+                    for b in range(1, src.count + 1):
+                        print(f"   - Band {b}/{src.count}")
+                        reproject(
+                            source=rasterio.band(src, b),
+                            destination=rasterio.band(dst, b),
+                            src_transform=src.transform,
+                            src_crs=src.crs,
+                            dst_transform=transform_new,
+                            dst_crs=dest_crs,
+                            resampling=resampling_for_warp,
+                        )
+                else:
+                    print("-> Copying pixels (no resampling).")
+                    dst.write(src.read())
 
-                # make GTiff creation a bit nicer
-                predictor = 3 if src.dtypes[0].startswith("float") else 2
-                kwargs.update({
-                    "driver": "GTiff",
-                    "compress": "deflate",
-                    "tiled": True,
-                    "predictor": predictor,
-                    "bigtiff": "IF_SAFER",
-                })
+            print(f"✔ Wrote {output_path}")
 
-                with rasterio.open(output_path, "w", **kwargs) as dst:
-                    if same_crs and (src.transform == transform):
-                        # straight copy
-                        dst.write(src.read())
-                    else:
-                        # band-by-band reprojection
-                        for b in range(1, src.count + 1):
-                            reproject(
-                                source=rasterio.band(src, b),
-                                destination=rasterio.band(dst, b),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=transform,
-                                dst_crs=dest_crs,
-                                resampling=Resampling.nearest,  # use BILINEAR/CUBIC for continuous data
-                            )
+            # Also export raster GeoPackage with tiles + pyramids
+            gpkg_out = output_path.with_suffix(".gpkg")
+            export_raster_gpkg(
+                output_path, gpkg_out,
+                nodata=kwargs.get("nodata"),
+                tile_format=gpkg_tile_format,
+                overview_resampling="AVERAGE",
+                overview_compress=gpkg_ovr_compress
+            )
+            print(f"✔ Also wrote raster GeoPackage: {gpkg_out}")
 
-                status.set(f"Wrote: {output_path.name}")
-                progress["value"] = i + 1
-                progress.update()
+            ui_set(root, status, f"Wrote: {output_path.name} (+ GPKG)")
+            progress["value"] = i + 1
+            progress.update()
 
-            except Exception as e:
-                status.set(f"Error processing {file_path}: {e}")
-                continue
+    ui_set(root, status, "Done.")
+    print("\nAll files processed.")
+
+
+def process_files_dem(file_paths, progress, status, should_continue, root):
+    """
+    DEM/top-down orthos:
+    - warp to north-up if needed
+    - bilinear resampling (continuous)
+    - GPKG with PNG tiles + DEFLATE overviews (lossless)
+    """
+    _process_topdown_common(
+        file_paths, progress, status, should_continue, root,
+        resampling_for_warp=Resampling.bilinear,
+        gpkg_tile_format="PNG",
+        gpkg_ovr_compress="DEFLATE"
+    )
+
+def process_files_truecolor(file_paths, progress, status, should_continue, root):
+    """
+    Truecolor RGB top-down orthos:
+    - warp to north-up if needed
+    - bilinear resampling (imagery)
+    - GPKG with JPEG tiles + JPEG overviews (compact)
+    """
+    _process_topdown_common(
+        file_paths, progress, status, should_continue, root,
+        resampling_for_warp=Resampling.bilinear,      # or Resampling.cubic for a bit smoother
+        gpkg_tile_format="JPEG",
+        gpkg_ovr_compress="JPEG"
+    )
 
 
 def ask_for_epsg(root):
@@ -355,28 +478,33 @@ def read_rcorthobox(diclist):
     return orthobox_gpdf
 
 processed_images = []
-def open_file_browser_hugeTiffs2GIS(root):
-    file_paths = filedialog.askopenfilenames(title="Select GeoTIFF files", filetypes=(("GeoTIFF files", "*.tif"), ("All files", "*.*")))
-
-    # Perform the operations on the GeoTIFF files
+def open_file_browser_hugeTiffs2GIS_dem(root):
+    file_paths = filedialog.askopenfilenames(
+        title="Select DEM/continuous GeoTIFFs (top-down)",
+        filetypes=(("GeoTIFF files", "*.tif;*.tiff"), ("All files", "*.*"))
+    )
     if file_paths:
-        # Create a progress bar
-        progress = ttk.Progressbar(root, length=300, mode='determinate')
-        progress.pack()
-
-        # Create a status label
-        status = tk.StringVar()
-        status_label = tk.Label(root, textvariable=status)
-        status_label.pack()
-
-        # Create a continue variable and an abort button
+        progress = ttk.Progressbar(root, length=300, mode='determinate'); progress.pack()
+        status = tk.StringVar(); tk.Label(root, textvariable=status).pack()
         should_continue = tk.BooleanVar(value=True)
-        abort_button = tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status))
-        abort_button.pack()
+        tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status)).pack()
+        threading.Thread(target=process_files_dem,
+                         args=(file_paths, progress, status, should_continue, root),
+                         daemon=True).start()
 
-        # Start a new thread for the processing
-
-        threading.Thread(target=process_files, args=(file_paths, progress, status, should_continue, root)).start()
+def open_file_browser_hugeTiffs2GIS_truecolor(root):
+    file_paths = filedialog.askopenfilenames(
+        title="Select truecolor RGB GeoTIFFs (top-down)",
+        filetypes=(("GeoTIFF files", "*.tif;*.tiff"), ("All files", "*.*"))
+    )
+    if file_paths:
+        progress = ttk.Progressbar(root, length=300, mode='determinate'); progress.pack()
+        status = tk.StringVar(); tk.Label(root, textvariable=status).pack()
+        should_continue = tk.BooleanVar(value=True)
+        tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status)).pack()
+        threading.Thread(target=process_files_truecolor,
+                         args=(file_paths, progress, status, should_continue, root),
+                         daemon=True).start()
 
 
 def open_file_browser_sideviewTiffs2GIS(root):
