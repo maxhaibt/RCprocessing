@@ -26,55 +26,24 @@ def ui_set(root, tkvar, value):
     root.after(0, lambda: tkvar.set(value))
 
 def fmt_affine(A):
+    # pretty-print a rasterio Affine as a 3x3
     return (f"| {A.a: .8f}, {A.b: .8f}, {A.c: .8f}|\n"
             f"| {A.d: .8f}, {A.e: .8f}, {A.f: .8f}|\n"
             f"|  0.00000000,  0.00000000,  1.00000000|")
 
 def log_transform_diff(src_A, dst_A):
     diffs = []
-    import numpy as _np
-    if not _np.isclose(src_A.a, dst_A.a): diffs.append(f"a (px width): {src_A.a} -> {dst_A.a}")
-    if not _np.isclose(src_A.e, dst_A.e): diffs.append(f"e (px height): {src_A.e} -> {dst_A.e}")
-    if not _np.isclose(src_A.b, dst_A.b): diffs.append(f"b (x-skew): {src_A.b} -> {dst_A.b}")
-    if not _np.isclose(src_A.d, dst_A.d): diffs.append(f"d (y-skew): {src_A.d} -> {dst_A.d}")
-    if not _np.isclose(src_A.c, dst_A.c): diffs.append(f"c (x origin): {src_A.c} -> {dst_A.c}")
-    if not _np.isclose(src_A.f, dst_A.f): diffs.append(f"f (y origin): {src_A.f} -> {dst_A.f}")
+    if not np.isclose(src_A.a, dst_A.a):    diffs.append(f"a (pixel width): {src_A.a} -> {dst_A.a}")
+    if not np.isclose(src_A.e, dst_A.e):    diffs.append(f"e (pixel height): {src_A.e} -> {dst_A.e}")
+    if not np.isclose(src_A.b, dst_A.b):    diffs.append(f"b (x-rotation/skew): {src_A.b} -> {dst_A.b}")
+    if not np.isclose(src_A.d, dst_A.d):    diffs.append(f"d (y-rotation/skew): {src_A.d} -> {dst_A.d}")
+    if not np.isclose(src_A.c, dst_A.c):    diffs.append(f"c (x origin): {src_A.c} -> {dst_A.c}")
+    if not np.isclose(src_A.f, dst_A.f):    diffs.append(f"f (y origin): {src_A.f} -> {dst_A.f}")
     return diffs
 
-def export_raster_gpkg(src_tif_path, gpkg_path, *, nodata=None,
-                       tile_format="PNG", blocksize=512,
-                       overview_levels=(2,4,8,16,32,64),
-                       overview_resampling="AVERAGE",
-                       overview_compress="DEFLATE",
-                       quality=90, zlevel=6):
-    """
-    Convert a (multi-band) GeoTIFF to a raster GeoPackage with tiles + pyramids.
-    - PNG (lossless) or JPEG tiles
-    - Overviews built in-place
-    """
-    co = [
-        f"TILE_FORMAT={tile_format}",
-        f"BLOCKSIZE={blocksize}",
-        f"QUALITY={quality}",  # for JPEG; ignored by PNG
-        f"ZLEVEL={zlevel}",    # for PNG; ignored by JPEG
-    ]
-    if nodata is not None:
-        co.append(f"NODATA_VALUE={nodata}")
-
-    gdal.Translate(str(gpkg_path), str(src_tif_path), format="GPKG", creationOptions=co)
-
-    gdal.SetConfigOption("COMPRESS_OVERVIEW", overview_compress)
-    ds = gdal.Open(str(gpkg_path), gdal.GA_Update)
-    try:
-        ds.BuildOverviews(overview_resampling, list(overview_levels))
-    finally:
-        ds = None
-
-
-def _process_topdown_common(file_paths, progress, status, should_continue, root, *,
-                            resampling_for_warp, gpkg_tile_format, gpkg_ovr_compress):
-    """Internal: warp to north-up + write GeoTIFF + raster GPKG with pyramids."""
+def process_files(file_paths, progress, status, should_continue, root):
     epsg_code = ask_for_epsg(root)
+
     try:
         dest_crs = CRS.from_epsg(int(epsg_code))
     except ValueError:
@@ -101,47 +70,52 @@ def _process_topdown_common(file_paths, progress, status, should_continue, root,
                 print("✖ CRS missing; skipping.")
                 continue
 
-            # Proposed north-up transform/size
+            try:
+                source_crs = CRS.from_string(src.crs.to_wkt())
+                print(f"Source CRS EPSG: {source_crs.to_epsg()} | Dest CRS EPSG: {dest_crs.to_epsg()}")
+            except Exception:
+                print("Note: could not derive EPSG from source; will use full CRS.")
+            
+            # Proposed north-up grid
             transform_new, width_new, height_new = calculate_default_transform(
                 src.crs, dest_crs, src.width, src.height, *src.bounds
             )
 
-            print(f"Source CRS: {src.crs}  →  Dest CRS: {dest_crs}")
             print("-> Src transform:\n" + fmt_affine(src.transform))
-            print("-> Proposed transform (north-up):\n" + fmt_affine(transform_new))
+            print("-> Proposed (north-up) transform:\n" + fmt_affine(transform_new))
             print(f"-> Proposed size: {width_new} x {height_new}")
 
-            # Decide: warp if CRS or grid differs
+            # Decide whether to warp: warp if grid differs OR CRS differs
             same_epsg = False
             try:
                 same_epsg = (src.crs is not None) and (src.crs.to_epsg() == dest_crs.to_epsg())
             except Exception:
                 same_epsg = False
 
+            # grid equality test (tolerant)
             grids_equal = np.allclose(
                 np.array(src.transform.to_gdal()),
                 np.array(transform_new.to_gdal()),
                 atol=1e-9
             )
-            need_warp = (not same_epsg) or (not grids_equal)
 
+            need_warp = (not same_epsg) or (not grids_equal)
             if not same_epsg:
                 print("-> CRS differs -> will reproject.")
             elif not grids_equal:
-                print("-> CRS equal but grid differs -> will warp to north-up.")
+                print("-> CRS equal but grid differs (rotation/scale/origin) -> will warp to north-up.")
                 for d in log_transform_diff(src.transform, transform_new):
                     print("   Δ " + d)
             else:
                 print("-> CRS and grid identical -> copy only (no warp).")
 
-            # Build output meta with sane GTiff defaults
+            # Build output metadata
             kwargs = src.meta.copy()
-            predictor = 3 if src.dtypes[0].startswith("float") else 2
             kwargs.update({
                 "driver": "GTiff",
                 "compress": "deflate",
                 "tiled": True,
-                "predictor": predictor,
+                "predictor": 3 if src.dtypes[0].startswith("float") else 2,
                 "bigtiff": "IF_SAFER",
             })
             if src.nodata is not None:
@@ -162,10 +136,15 @@ def _process_topdown_common(file_paths, progress, status, should_continue, root,
                     "height": src.height,
                 })
 
-            # Do the write
+            # Choose resampling automatically (nearest for integer types)
+            first_dtype = np.dtype(src.dtypes[0])
+            is_integer = np.issubdtype(first_dtype, np.integer)
+            resamp = Resampling.nearest if is_integer else Resampling.bilinear
+            print(f"-> Resampling: {'NEAREST' if is_integer else 'BILINEAR'} (dtype={first_dtype})")
+
             with rasterio.open(output_path, "w", **kwargs) as dst:
                 if need_warp:
-                    print(f"-> Reprojecting with {resampling_for_warp.name}…")
+                    print("-> Reprojecting bands…")
                     for b in range(1, src.count + 1):
                         print(f"   - Band {b}/{src.count}")
                         reproject(
@@ -175,60 +154,17 @@ def _process_topdown_common(file_paths, progress, status, should_continue, root,
                             src_crs=src.crs,
                             dst_transform=transform_new,
                             dst_crs=dest_crs,
-                            resampling=resampling_for_warp,
+                            resampling=resamp,
                         )
                 else:
                     print("-> Copying pixels (no resampling).")
                     dst.write(src.read())
 
             print(f"✔ Wrote {output_path}")
-
-            # Also export raster GeoPackage with tiles + pyramids
-            gpkg_out = output_path.with_suffix(".gpkg")
-            export_raster_gpkg(
-                output_path, gpkg_out,
-                nodata=kwargs.get("nodata"),
-                tile_format=gpkg_tile_format,
-                overview_resampling="AVERAGE",
-                overview_compress=gpkg_ovr_compress
-            )
-            print(f"✔ Also wrote raster GeoPackage: {gpkg_out}")
-
-            ui_set(root, status, f"Wrote: {output_path.name} (+ GPKG)")
+            ui_set(root, status, f"Wrote: {output_path.name}")
             progress["value"] = i + 1
             progress.update()
 
-    ui_set(root, status, "Done.")
-    print("\nAll files processed.")
-
-
-def process_files_dem(file_paths, progress, status, should_continue, root):
-    """
-    DEM/top-down orthos:
-    - warp to north-up if needed
-    - bilinear resampling (continuous)
-    - GPKG with PNG tiles + DEFLATE overviews (lossless)
-    """
-    _process_topdown_common(
-        file_paths, progress, status, should_continue, root,
-        resampling_for_warp=Resampling.bilinear,
-        gpkg_tile_format="PNG",
-        gpkg_ovr_compress="DEFLATE"
-    )
-
-def process_files_truecolor(file_paths, progress, status, should_continue, root):
-    """
-    Truecolor RGB top-down orthos:
-    - warp to north-up if needed
-    - bilinear resampling (imagery)
-    - GPKG with JPEG tiles + JPEG overviews (compact)
-    """
-    _process_topdown_common(
-        file_paths, progress, status, should_continue, root,
-        resampling_for_warp=Resampling.bilinear,      # or Resampling.cubic for a bit smoother
-        gpkg_tile_format="JPEG",
-        gpkg_ovr_compress="JPEG"
-    )
 
 
 def ask_for_epsg(root):
@@ -283,7 +219,7 @@ def profilemappping_to_gpkg(raster_files, output_gpkg, root):
     gdf_lines.to_file(output_gpkg, layer='upper_lines', driver='GPKG') 
 
     # Save orthoboxes layer
-    gdf_orthobox = read_rcorthobox([{'orthoboxfile': Path(file_path).with_suffix('.rcortho')} for file_path in raster_files])
+    gdf_orthobox = read_rcorthobox([{'orthoboxfile': Path(file_path).with_suffix('.rsortho')} for file_path in raster_files])
     gdf_orthobox.to_file(output_gpkg, layer='orthoboxes', driver='GPKG')
      
 
@@ -403,7 +339,7 @@ def abort_processing(should_continue, status):
 
 
 def open_file_browser_Orthobox2GIS():
-    file_paths = filedialog.askopenfilenames(title="Select orthobox files", filetypes=(("Orthobox files", "*.rcortho"), ("All files", "*.*")))
+    file_paths = filedialog.askopenfilenames(title="Select orthobox files", filetypes=(("Orthobox files", "*.rsortho"), ("All files", "*.*")))
 
     # Read and process the orthobox files
     if file_paths:
