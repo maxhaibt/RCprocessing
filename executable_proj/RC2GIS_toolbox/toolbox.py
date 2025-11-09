@@ -625,28 +625,33 @@ def read_rcorthobox(diclist):
     return orthobox_gpdf
 
 processed_images = []
-def open_file_browser_hugeTiffs2GIS(root):
-    file_paths = filedialog.askopenfilenames(title="Select GeoTIFF files", filetypes=(("GeoTIFF files", "*.tif"), ("All files", "*.*")))
-
-    # Perform the operations on the GeoTIFF files
+def open_file_browser_hugeTiffs2GIS_dem(root):
+    file_paths = filedialog.askopenfilenames(
+        title="Select DEM/continuous GeoTIFFs (top-down)",
+        filetypes=(("GeoTIFF files", "*.tif;*.tiff"), ("All files", "*.*"))
+    )
     if file_paths:
-        # Create a progress bar
-        progress = ttk.Progressbar(root, length=300, mode='determinate')
-        progress.pack()
-
-        # Create a status label
-        status = tk.StringVar()
-        status_label = tk.Label(root, textvariable=status)
-        status_label.pack()
-
-        # Create a continue variable and an abort button
+        progress = ttk.Progressbar(root, length=300, mode='determinate'); progress.pack()
+        status = tk.StringVar(); tk.Label(root, textvariable=status).pack()
         should_continue = tk.BooleanVar(value=True)
-        abort_button = tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status))
-        abort_button.pack()
+        tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status)).pack()
+        threading.Thread(target=process_files_dem,
+                         args=(file_paths, progress, status, should_continue, root),
+                         daemon=True).start()
 
-        # Start a new thread for the processing
-
-        threading.Thread(target=process_files, args=(file_paths, progress, status, should_continue, root)).start()
+def open_file_browser_hugeTiffs2GIS_truecolor(root):
+    file_paths = filedialog.askopenfilenames(
+        title="Select truecolor RGB GeoTIFFs (top-down)",
+        filetypes=(("GeoTIFF files", "*.tif;*.tiff"), ("All files", "*.*"))
+    )
+    if file_paths:
+        progress = ttk.Progressbar(root, length=300, mode='determinate'); progress.pack()
+        status = tk.StringVar(); tk.Label(root, textvariable=status).pack()
+        should_continue = tk.BooleanVar(value=True)
+        tk.Button(root, text="Abort", command=lambda: abort_processing(should_continue, status)).pack()
+        threading.Thread(target=process_files_truecolor,
+                         args=(file_paths, progress, status, should_continue, root),
+                         daemon=True).start()
 
 
 def open_file_browser_sideviewTiffs2GIS(root):
